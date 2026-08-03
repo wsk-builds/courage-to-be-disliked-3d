@@ -354,16 +354,6 @@ export function createVoiceDirector(options = {}) {
     }
   }
 
-  function unlock() {
-    if (state.unlocked || !synth) return;
-    state.unlocked = true;
-    try {
-      if (synth.paused) synth.resume();
-    } catch (_) {
-      /* ignore */
-    }
-  }
-
   function stop() {
     jobId += 1; // cancel pending async speak
     activeJob = null;
@@ -440,13 +430,19 @@ export function createVoiceDirector(options = {}) {
     const myId = ++jobId;
     activeJob = { id: myId };
 
-    // Always cancel previous, then wait for idle
+    // Cancel previous utterance. Only wait for idle when something is actually queued —
+    // a long await on a cold start can drop Chrome's user-gesture activation for first speech.
+    const busy = !!(synth.speaking || synth.pending);
     try {
       synth.cancel();
     } catch (_) {
       /* ignore */
     }
-    await waitForSynthIdle(synth, 1200);
+    if (busy) {
+      await waitForSynthIdle(synth, 1200);
+    } else {
+      await wait(0);
+    }
     if (myId !== jobId) return { ok: false, estimated };
 
     // Refresh voices if needed (EN list often empty until user gesture)
@@ -674,17 +670,22 @@ export function createVoiceDirector(options = {}) {
     };
   }
 
+  /**
+   * Call from a real user gesture (click / key / touch).
+   * Browsers block TTS until then; also refreshes the voice list (often empty before gesture).
+   */
   function unlock() {
-    if (state.unlocked || !synth) return;
+    if (!synth) return;
+    const first = !state.unlocked;
     state.unlocked = true;
     try {
       if (synth.paused) synth.resume();
-      // Warm-up: populate voices after gesture
       state.voices = synth.getVoices() || state.voices;
       applyManualThenAuto();
     } catch (_) {
       /* ignore */
     }
+    return first;
   }
 
   function registerRole() {

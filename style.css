@@ -620,6 +620,67 @@ kbd {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* voice gate — browsers block TTS until a user gesture */
+.voice-gate {
+  position: absolute;
+  left: 50%;
+  bottom: calc(5.2rem + 118px);
+  transform: translateX(-50%);
+  z-index: 40;
+  width: min(720px, 92vw);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  transition: opacity 0.35s ease, visibility 0.35s ease, transform 0.35s ease;
+}
+
+.voice-gate[hidden] {
+  display: none;
+}
+
+.voice-gate.is-hiding {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(8px);
+  pointer-events: none;
+}
+
+.voice-gate-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 100%;
+  padding: 0.7rem 1.15rem;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 165, 116, 0.55);
+  background: linear-gradient(180deg, rgba(40, 32, 22, 0.94), rgba(18, 16, 14, 0.92));
+  color: var(--paper);
+  font: inherit;
+  font-size: 0.92rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 12px 36px rgba(0, 0, 0, 0.45),
+    0 0 28px rgba(212, 165, 116, 0.18);
+  animation: voice-gate-pulse 2.2s ease-in-out infinite;
+}
+
+.voice-gate-btn:hover {
+  border-color: rgba(212, 165, 116, 0.9);
+  color: #fff8ea;
+}
+
+.voice-gate-icon {
+  font-size: 1.05rem;
+}
+
+@keyframes voice-gate-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 12px 36px rgba(0,0,0,0.45), 0 0 22px rgba(212,165,116,0.14); }
+  50% { box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 14px 40px rgba(0,0,0,0.5), 0 0 34px rgba(212,165,116,0.32); }
+}
+
 /* dialogue */
 #dialogue-panel {
   position: absolute;

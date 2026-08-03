@@ -97,6 +97,7 @@ export const UI = {
     voice: 'Voice',
     voiceOn: '🔊 Voice',
     voiceOff: '🔇 Mute',
+    voiceGate: 'Click anywhere to enable voice — audio starts with your first tap',
     cast: '🎙 Cast',
     castTitle: 'Voice casting',
     castStatus: 'Browser system voices · preview and save',
@@ -118,6 +119,7 @@ export const UI = {
     navHint: '<kbd>C</kbd> menu · <kbd>[ ]</kbd> chapter · <kbd>1-9</kbd> scene',
     helpTitle: 'Controls',
     helpItems: [
+      '<kbd>Click / any key</kbd> enable voice (browser requires one tap)',
       '<kbd>W A S D</kbd> free-fly (look direction) · <kbd>Shift</kbd> sprint',
       '<kbd>Q E</kbd> or <kbd>PgUp/PgDn</kbd> altitude · <kbd>Wheel</kbd> rise/lower',
       '<kbd>Click canvas</kbd> lock mouse look (free explore)',
@@ -167,6 +169,7 @@ export const UI = {
     voice: '配音',
     voiceOn: '🔊 配音',
     voiceOff: '🔇 静音',
+    voiceGate: '点击任意处开启配音 — 浏览器需一次点击后才能播放语音',
     cast: '🎙 选声',
     castTitle: '角色选声',
     castStatus: '使用浏览器系统语音 · 可试听后保存',
@@ -188,6 +191,7 @@ export const UI = {
     navHint: '快捷键 <kbd>C</kbd> 开合目录 · <kbd>[ ]</kbd> 换章 · <kbd>1-9</kbd> 换段',
     helpTitle: '操作说明',
     helpItems: [
+      '<kbd>点击 / 任意键</kbd> 开启配音（浏览器要求先有一次交互）',
       '<kbd>W A S D</kbd> 自由飞行（沿视线）· <kbd>Shift</kbd> 加速',
       '<kbd>Q E</kbd> 或 <kbd>PgUp/PgDn</kbd> 升降 · <kbd>滚轮</kbd> 快速调高度',
       '<kbd>点击画面</kbd> 锁定鼠标环顾（自由探索）',

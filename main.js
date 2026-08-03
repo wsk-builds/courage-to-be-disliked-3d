@@ -77,6 +77,9 @@ const navToggle = document.getElementById('nav-toggle');
 const navCollapse = document.getElementById('nav-collapse');
 const helpPanel = document.getElementById('help-panel');
 const btnHelp = document.getElementById('btn-help');
+const voiceGateEl = document.getElementById('voice-gate');
+const voiceGateBtn = document.getElementById('voice-gate-btn');
+const voiceGateLabel = document.getElementById('voice-gate-label');
 
 function setLoad(p, hint) {
   if (loadingFill) loadingFill.style.width = `${Math.floor(p * 100)}%`;
@@ -110,6 +113,10 @@ const voice = createVoiceDirector({
 });
 let voiceGeneration = 0;
 let currentLineDuration = 6;
+/** Browser autoplay policy: TTS only works after a real user gesture. */
+let audioPrimed = false;
+/** Timestamp of first successful prime — avoids play/mute buttons flipping state on that same click. */
+let audioPrimedAt = 0;
 
 // Story state must be declared before applyLocale() (called early on boot)
 let lineIndex = 0;
@@ -121,8 +128,44 @@ let youthEntered = false;
 let youthSeated = false;
 let lastNightPhase = null;
 
+function showVoiceGate(show) {
+  if (!voiceGateEl) return;
+  if (show && !audioPrimed && voice.getStatus().enabled) {
+    voiceGateEl.hidden = false;
+    voiceGateEl.classList.remove('is-hiding');
+  } else {
+    voiceGateEl.classList.add('is-hiding');
+    window.setTimeout(() => {
+      if (audioPrimed || !voice.getStatus().enabled) voiceGateEl.hidden = true;
+    }, 400);
+  }
+}
+
+function wasJustPrimed(ms = 500) {
+  return audioPrimedAt > 0 && performance.now() - audioPrimedAt < ms;
+}
+
 function unlockAudio() {
   voice.unlock();
+}
+
+/**
+ * First click/key/touch: unlock Web Speech and (re)start current-line audio.
+ * Any page interaction is enough — users should not need the mute toggle.
+ * @returns {boolean} true if this call performed the first prime
+ */
+function primeAudioFromUserGesture() {
+  unlockAudio();
+  if (audioPrimed) return false;
+  audioPrimed = true;
+  audioPrimedAt = performance.now();
+  showVoiceGate(false);
+
+  if (!voice.getStatus().enabled) return true;
+
+  // Story may already be auto-playing visually; attach audio to the current line now.
+  if (playing) speakCurrentLine();
+  return true;
 }
 
 function speakCurrentLine() {
@@ -135,6 +178,11 @@ function speakCurrentLine() {
   currentLineDuration = Math.max(line.duration || 5, est) + hold;
   if (!playing) {
     voice.stop();
+    return;
+  }
+  // Before first gesture, browsers drop TTS — show the gate instead of failing silently
+  if (!audioPrimed || !voice.getStatus().unlocked) {
+    showVoiceGate(true);
     return;
   }
   voice.speak(line.speaker, text, line.emotion || 'calm').then(() => {
@@ -183,6 +231,8 @@ function applyLocale() {
 
   voice.setAppLang(lang);
   updateVoiceButton();
+  if (voiceGateLabel) voiceGateLabel.textContent = ui('voiceGate');
+  showVoiceGate(!audioPrimed);
 
   // Rails / dialogue only after story state exists and rails helpers are ready
   if (typeof buildPartRail === 'function') {
@@ -223,11 +273,24 @@ function switchLanguage(lang) {
 }
 
 function toggleVoice() {
-  unlockAudio();
+  primeAudioFromUserGesture();
+  // Same click that unlocked audio must not mute
+  if (wasJustPrimed()) {
+    voice.setEnabled(true);
+    updateVoiceButton();
+    showVoiceGate(false);
+    if (playing) speakCurrentLine();
+    return;
+  }
   voice.setEnabled(!voice.getStatus().enabled);
   updateVoiceButton();
-  if (voice.getStatus().enabled && playing) speakCurrentLine();
-  else voice.stop();
+  if (voice.getStatus().enabled) {
+    showVoiceGate(false);
+    if (playing) speakCurrentLine();
+  } else {
+    voice.stop();
+    showVoiceGate(false);
+  }
 }
 
 function setCastOpen(open) {
@@ -953,7 +1016,14 @@ function jumpPartDelta(delta) {
 }
 
 function togglePlay() {
-  unlockAudio();
+  primeAudioFromUserGesture();
+  // Same click/key that unlocked audio should not immediately pause autoplay
+  if (wasJustPrimed()) {
+    playing = true;
+    btnPlay.textContent = '❚❚';
+    if (voice.getStatus().enabled) speakCurrentLine();
+    return;
+  }
   playing = !playing;
   btnPlay.textContent = playing ? '❚❚' : '▶';
   if (!playing) {
@@ -976,7 +1046,7 @@ function togglePlay() {
 
 // ——— Input ———
 window.addEventListener('keydown', (e) => {
-  unlockAudio();
+  primeAudioFromUserGesture();
   keys.add(e.code);
   if (e.code === 'Space') {
     e.preventDefault();
@@ -1036,12 +1106,26 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 
+// Any first interaction unlocks TTS and starts current-line audio (autoplay policy).
 ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
-  window.addEventListener(ev, () => unlockAudio(), { once: true, capture: true });
+  window.addEventListener(
+    ev,
+    () => {
+      primeAudioFromUserGesture();
+    },
+    { capture: true },
+  );
 });
 
+if (voiceGateBtn) {
+  voiceGateBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    primeAudioFromUserGesture();
+  });
+}
+
 canvas.addEventListener('click', () => {
-  unlockAudio();
+  primeAudioFromUserGesture();
   canvas.requestPointerLock();
 });
 
@@ -1072,11 +1156,11 @@ canvas.addEventListener(
 
 btnPlay.addEventListener('click', togglePlay);
 btnNext.addEventListener('click', () => {
-  unlockAudio();
+  primeAudioFromUserGesture();
   nextLine();
 });
 btnPrev.addEventListener('click', () => {
-  unlockAudio();
+  primeAudioFromUserGesture();
   prevLine();
 });
 
@@ -1092,7 +1176,7 @@ if (btnLangZh) {
 }
 if (btnCast) {
   btnCast.addEventListener('click', () => {
-    unlockAudio();
+    primeAudioFromUserGesture();
     toggleCast();
   });
 }
