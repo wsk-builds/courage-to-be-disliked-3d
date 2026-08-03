@@ -17,10 +17,10 @@
  * @property {string} styleNote
  */
 
-const STORAGE_KEY = 'courage-voice-cast-v1';
+const STORAGE_KEY = 'courage-voice-cast-v2';
 
-/** @type {Record<string, VoiceProfile>} */
-export const VOICE_PROFILES = {
+/** Chinese system-voice casting heuristics */
+const PROFILES_ZH = {
   narrator: {
     label: '旁白',
     pitch: 0.95,
@@ -63,22 +63,86 @@ export const VOICE_PROFILES = {
   },
 };
 
-/** Sample lines for audition */
-export const PREVIEW_LINES = {
-  narrator: '在这座有着千年历史的古城郊外，住着一位哲学家。',
-  philosopher: '欢迎。请坐。所谓的自由，就是被别人讨厌的勇气。',
-  youth: '我不是来请教的。我是来反驳你的。这根本站不住脚！',
+/**
+ * English casting: distinct personas for native-like delivery.
+ * Philosopher: older, measured (David/James/George/Male low pitch)
+ * Youth: brighter, quicker (Guy/Mark/higher male — avoid same as philosopher)
+ * Narrator: clear, documentary (female Zira/Susan/Jenny or calm male)
+ */
+const PROFILES_EN = {
+  narrator: {
+    label: 'Narrator',
+    pitch: 0.98,
+    rate: 0.94,
+    volume: 0.9,
+    preferName: ['zira', 'susan', 'jenny', 'aria', 'sara', 'female', 'samantha', 'moira', 'victoria'],
+    avoidName: ['david', 'mark', 'george', 'ravi'],
+    gender: 'female',
+    styleNote: 'Calm documentary narrator — clear, unhurried',
+  },
+  philosopher: {
+    label: 'Philosopher',
+    pitch: 0.78,
+    rate: 0.84,
+    volume: 1.0,
+    preferName: ['david', 'george', 'james', 'daniel', 'richard', 'male', 'alex', 'ryan'],
+    avoidName: ['zira', 'susan', 'jenny', 'aria'],
+    gender: 'male',
+    styleNote: 'Older scholar — low, slow, deliberate pauses',
+  },
+  youth: {
+    label: 'Youth',
+    pitch: 1.14,
+    rate: 1.08,
+    volume: 1.0,
+    preferName: ['mark', 'guy', 'justin', 'steffan', 'sam', 'male'],
+    avoidName: ['david', 'george', 'zira', 'susan'],
+    gender: 'male',
+    styleNote: 'Restless young man — brighter, quicker, edged',
+  },
+  guest: {
+    label: 'Guest',
+    pitch: 1.0,
+    rate: 1.0,
+    volume: 0.95,
+    preferName: [],
+    avoidName: [],
+    gender: 'any',
+    styleNote: 'Neutral default',
+  },
 };
 
-export function cleanSpeechText(text) {
+/** @type {Record<string, VoiceProfile>} */
+export let VOICE_PROFILES = { ...PROFILES_EN };
+
+/** Sample lines for audition */
+export const PREVIEW_LINES = {
+  zh: {
+    narrator: '在这座有着千年历史的古城郊外，住着一位哲学家。',
+    philosopher: '欢迎。请坐。所谓的自由，就是被别人讨厌的勇气。',
+    youth: '我不是来请教的。我是来反驳你的。这根本站不住脚！',
+  },
+  en: {
+    narrator: 'On the outskirts of an ancient city lived a philosopher.',
+    philosopher: 'Welcome. Please, sit. Freedom, in this sense, is the courage to be disliked.',
+    youth: "I'm not here for lessons. I'm here to take you apart. That claim doesn't hold!",
+  },
+};
+
+function speechLangCode(appLang) {
+  return appLang === 'zh' ? 'zh-CN' : 'en-US';
+}
+
+export function cleanSpeechText(text, lang = 'en') {
   if (!text) return '';
-  return String(text)
+  let s = String(text)
     .replace(/（[^）]*）/g, '')
     .replace(/\([^)]*\)/g, '')
-    .replace(/[—–]/g, '，')
-    .replace(/…+/g, '。')
+    .replace(/[—–]/g, lang === 'zh' ? '，' : ', ')
+    .replace(/…+/g, lang === 'zh' ? '。' : '...')
     .replace(/\s+/g, ' ')
     .trim();
+  return s;
 }
 
 export function estimateSpeechSeconds(text, rate = 1) {
@@ -87,12 +151,19 @@ export function estimateSpeechSeconds(text, rate = 1) {
   return Math.max(1.2, (chars / 3.8) / Math.max(0.5, rate) + 0.45);
 }
 
-function scoreVoice(voice, profile, usedVoiceURIs) {
+function scoreVoice(voice, profile, usedVoiceURIs, appLang = 'en') {
   const name = `${voice.name} ${voice.lang}`.toLowerCase();
   let score = 0;
-  if (/^zh(-|_)/i.test(voice.lang) || /chinese|中文|中国/i.test(name)) score += 50;
-  else if (/zh/i.test(voice.lang)) score += 40;
-  else score -= 20;
+  if (appLang === 'zh') {
+    if (/^zh(-|_)/i.test(voice.lang) || /chinese|中文|中国/i.test(name)) score += 50;
+    else if (/zh/i.test(voice.lang)) score += 40;
+    else score -= 20;
+  } else {
+    if (/^en(-|_)/i.test(voice.lang) || /english|united states|united kingdom|australia|ireland|india/i.test(name))
+      score += 50;
+    else if (/en/i.test(voice.lang)) score += 40;
+    else score -= 25;
+  }
 
   for (const p of profile.preferName || []) {
     if (name.includes(p.toLowerCase())) score += 25;
@@ -118,21 +189,16 @@ function scoreVoice(voice, profile, usedVoiceURIs) {
 function loadSavedCast() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { uris: {}, pitch: {}, rate: {} };
-    const data = JSON.parse(raw);
-    return {
-      uris: data.uris || data || {},
-      pitch: data.pitch || {},
-      rate: data.rate || {},
-    };
+    if (!raw) return {};
+    return JSON.parse(raw) || {};
   } catch (_) {
-    return { uris: {}, pitch: {}, rate: {} };
+    return {};
   }
 }
 
-function saveCast(uris, pitch, rate) {
+function saveCast(payload) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ uris, pitch, rate }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (_) {
     /* ignore */
   }
@@ -144,16 +210,18 @@ export function createVoiceDirector(options = {}) {
     enabled: options.enabled !== false,
     unlocked: false,
     volume: options.volume ?? 1,
+    /** app content language drives TTS language + voice heuristics */
+    appLang: options.appLang === 'zh' ? 'zh' : 'en',
     voices: [],
     /** @type {Record<string, SpeechSynthesisVoice|null>} */
     assigned: {},
-    /** manual overrides by voiceURI string; null = use auto */
-    /** @type {Record<string, string|null>} */
-    manualUri: { ...saved.uris },
-    /** @type {Record<string, number>} */
-    manualPitch: { ...saved.pitch },
-    /** @type {Record<string, number>} */
-    manualRate: { ...saved.rate },
+    /** manual overrides per language: { en: { philosopher: uri }, zh: {...} } */
+    /** @type {Record<string, Record<string, string>>} */
+    manualUriByLang: saved.urisByLang || { en: { ...(saved.uris || {}) }, zh: {} },
+    /** @type {Record<string, Record<string, number>>} */
+    manualPitchByLang: saved.pitchByLang || { en: { ...(saved.pitch || {}) }, zh: {} },
+    /** @type {Record<string, Record<string, number>>} */
+    manualRateByLang: saved.rateByLang || { en: { ...(saved.rate || {}) }, zh: {} },
     current: null,
     speaking: false,
     onStart: options.onStart || null,
@@ -163,19 +231,42 @@ export function createVoiceDirector(options = {}) {
     ready: false,
   };
 
+  function profiles() {
+    return state.appLang === 'zh' ? PROFILES_ZH : PROFILES_EN;
+  }
+  function manualUri() {
+    if (!state.manualUriByLang[state.appLang]) state.manualUriByLang[state.appLang] = {};
+    return state.manualUriByLang[state.appLang];
+  }
+  function manualPitch() {
+    if (!state.manualPitchByLang[state.appLang]) state.manualPitchByLang[state.appLang] = {};
+    return state.manualPitchByLang[state.appLang];
+  }
+  function manualRate() {
+    if (!state.manualRateByLang[state.appLang]) state.manualRateByLang[state.appLang] = {};
+    return state.manualRateByLang[state.appLang];
+  }
+
+  VOICE_PROFILES = { ...profiles() };
+
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
 
   function persist() {
-    saveCast(state.manualUri, state.manualPitch, state.manualRate);
+    saveCast({
+      urisByLang: state.manualUriByLang,
+      pitchByLang: state.manualPitchByLang,
+      rateByLang: state.manualRateByLang,
+    });
   }
 
   function applyManualThenAuto() {
+    VOICE_PROFILES = { ...profiles() };
     const used = new Set();
     const roles = ['philosopher', 'youth', 'narrator'];
+    const uris = manualUri();
 
-    // 1) Apply manual picks first
     for (const role of roles) {
-      const uri = state.manualUri[role];
+      const uri = uris[role];
       if (uri) {
         const v = state.voices.find((x) => x.voiceURI === uri) || null;
         state.assigned[role] = v;
@@ -185,17 +276,22 @@ export function createVoiceDirector(options = {}) {
       }
     }
 
-    // 2) Auto-fill remaining
     for (const role of roles) {
       if (state.assigned[role]) continue;
       const profile = VOICE_PROFILES[role] || VOICE_PROFILES.guest;
       const ranked = [...state.voices]
-        .map((v) => ({ v, s: scoreVoice(v, profile, used) }))
+        .map((v) => ({ v, s: scoreVoice(v, profile, used, state.appLang) }))
         .sort((a, b) => b.s - a.s);
       const best = ranked[0]?.v || null;
       state.assigned[role] = best;
       if (best) used.add(best.voiceURI);
     }
+  }
+
+  function setAppLang(lang) {
+    state.appLang = lang === 'zh' ? 'zh' : 'en';
+    applyManualThenAuto();
+    if (state.onVoicesChanged) state.onVoicesChanged(getCastInfo());
   }
 
   function refreshVoices() {
@@ -207,7 +303,9 @@ export function createVoiceDirector(options = {}) {
   }
 
   function registerRole(role, profile) {
-    VOICE_PROFILES[role] = { ...VOICE_PROFILES.guest, ...profile, label: profile.label || role };
+    const pack = profiles();
+    pack[role] = { ...pack.guest, ...profile, label: profile.label || role };
+    VOICE_PROFILES = { ...pack };
     if (state.voices.length) applyManualThenAuto();
   }
 
@@ -238,10 +336,11 @@ export function createVoiceDirector(options = {}) {
   }
 
   function resolvePitchRate(role, emotion = 'calm') {
-    const profile = VOICE_PROFILES[role] || VOICE_PROFILES.guest;
-    let pitch =
-      typeof state.manualPitch[role] === 'number' ? state.manualPitch[role] : profile.pitch;
-    let rate = typeof state.manualRate[role] === 'number' ? state.manualRate[role] : profile.rate;
+    const profile = profiles()[role] || profiles().guest;
+    const mp = manualPitch();
+    const mr = manualRate();
+    let pitch = typeof mp[role] === 'number' ? mp[role] : profile.pitch;
+    let rate = typeof mr[role] === 'number' ? mr[role] : profile.rate;
 
     switch (emotion) {
       case 'angry':
@@ -279,8 +378,8 @@ export function createVoiceDirector(options = {}) {
   }
 
   function speak(role, text, emotion = 'calm') {
-    const profile = VOICE_PROFILES[role] || VOICE_PROFILES.guest;
-    const cleaned = cleanSpeechText(text);
+    const profile = profiles()[role] || profiles().guest;
+    const cleaned = cleanSpeechText(text, state.appLang);
     const { pitch, rate, volume } = resolvePitchRate(role, emotion);
     const estimated = estimateSpeechSeconds(cleaned, rate);
 
@@ -293,15 +392,16 @@ export function createVoiceDirector(options = {}) {
 
     return new Promise((resolve) => {
       const u = new SpeechSynthesisUtterance(cleaned);
-      u.lang = 'zh-CN';
+      u.lang = speechLangCode(state.appLang);
       u.pitch = pitch;
       u.rate = rate;
       u.volume = volume;
 
+      const langRe = state.appLang === 'zh' ? /zh/i : /en/i;
       const v =
         state.assigned[role] ||
         state.assigned.narrator ||
-        state.voices.find((x) => /zh/i.test(x.lang));
+        state.voices.find((x) => langRe.test(x.lang));
       if (v) u.voice = v;
 
       state.current = u;
@@ -341,52 +441,58 @@ export function createVoiceDirector(options = {}) {
 
   /** Preview without affecting story timer much */
   function preview(role, text) {
-    const sample = text || PREVIEW_LINES[role] || PREVIEW_LINES.narrator;
+    const pack = PREVIEW_LINES[state.appLang] || PREVIEW_LINES.en;
+    const sample = text || pack[role] || pack.narrator;
     unlock();
     return speak(role, sample, 'calm');
   }
 
   /**
-   * Manually assign a system voice to a role.
+   * Manually assign a system voice to a role (for current app language).
    * @param {string} role
    * @param {string|null} voiceURI  null = back to auto
    */
   function setRoleVoice(role, voiceURI) {
-    if (voiceURI) state.manualUri[role] = voiceURI;
-    else delete state.manualUri[role];
+    const uris = manualUri();
+    if (voiceURI) uris[role] = voiceURI;
+    else delete uris[role];
     applyManualThenAuto();
     persist();
     if (state.onVoicesChanged) state.onVoicesChanged(getCastInfo());
   }
 
   function setRolePitch(role, pitch) {
-    state.manualPitch[role] = Math.max(0.5, Math.min(1.5, Number(pitch)));
+    manualPitch()[role] = Math.max(0.5, Math.min(1.5, Number(pitch)));
     persist();
   }
 
   function setRoleRate(role, rate) {
-    state.manualRate[role] = Math.max(0.6, Math.min(1.4, Number(rate)));
+    manualRate()[role] = Math.max(0.6, Math.min(1.4, Number(rate)));
     persist();
   }
 
   function resetCast() {
-    state.manualUri = {};
-    state.manualPitch = {};
-    state.manualRate = {};
+    state.manualUriByLang[state.appLang] = {};
+    state.manualPitchByLang[state.appLang] = {};
+    state.manualRateByLang[state.appLang] = {};
     applyManualThenAuto();
     persist();
     if (state.onVoicesChanged) state.onVoicesChanged(getCastInfo());
   }
 
-  function listVoices({ chineseOnly = false } = {}) {
+  function listVoices({ langFilter = null } = {}) {
+    const filter = langFilter || state.appLang;
     let list = [...state.voices];
-    if (chineseOnly) {
+    if (filter === 'zh') {
       list = list.filter(
         (v) => /zh/i.test(v.lang) || /chinese|中文|中国|hong kong|taiwan/i.test(v.name)
       );
-      // If no Chinese, return all so user can still pick
-      if (!list.length) list = [...state.voices];
+    } else if (filter === 'en') {
+      list = list.filter(
+        (v) => /en/i.test(v.lang) || /english|united states|united kingdom|australia|ireland/i.test(v.name)
+      );
     }
+    if (!list.length) list = [...state.voices];
     return list
       .map((v) => ({
         name: v.name,
@@ -396,38 +502,43 @@ export function createVoiceDirector(options = {}) {
         default: !!v.default,
       }))
       .sort((a, b) => {
-        const az = /zh/i.test(a.lang) ? 0 : 1;
-        const bz = /zh/i.test(b.lang) ? 0 : 1;
+        const pref = filter === 'zh' ? /zh/i : /en/i;
+        const az = pref.test(a.lang) ? 0 : 1;
+        const bz = pref.test(b.lang) ? 0 : 1;
         if (az !== bz) return az - bz;
-        return a.name.localeCompare(b.name, 'zh');
+        return a.name.localeCompare(b.name, filter === 'zh' ? 'zh' : 'en');
       });
   }
 
   function getCastInfo() {
     const roles = ['philosopher', 'youth', 'narrator'];
     const cast = {};
+    const pack = profiles();
+    const uris = manualUri();
+    const mp = manualPitch();
+    const mr = manualRate();
     for (const role of roles) {
       const v = state.assigned[role];
-      const profile = VOICE_PROFILES[role];
+      const profile = pack[role];
       cast[role] = {
         label: profile?.label || role,
         voiceURI: v?.voiceURI || null,
         voiceName: v?.name || null,
         lang: v?.lang || null,
-        manual: !!state.manualUri[role],
-        pitch:
-          typeof state.manualPitch[role] === 'number'
-            ? state.manualPitch[role]
-            : profile?.pitch ?? 1,
-        rate:
-          typeof state.manualRate[role] === 'number' ? state.manualRate[role] : profile?.rate ?? 1,
+        manual: !!uris[role],
+        pitch: typeof mp[role] === 'number' ? mp[role] : profile?.pitch ?? 1,
+        rate: typeof mr[role] === 'number' ? mr[role] : profile?.rate ?? 1,
         styleNote: profile?.styleNote || '',
       };
     }
+    const filtered = listVoices();
     return {
       ready: state.ready,
+      appLang: state.appLang,
       voiceCount: state.voices.length,
-      chineseCount: listVoices({ chineseOnly: true }).length,
+      filteredCount: filtered.length,
+      chineseCount: listVoices({ langFilter: 'zh' }).length,
+      englishCount: listVoices({ langFilter: 'en' }).length,
       cast,
     };
   }
@@ -448,6 +559,7 @@ export function createVoiceDirector(options = {}) {
       ready: state.ready,
       speaking: state.speaking,
       volume: state.volume,
+      appLang: state.appLang,
       voices: listVoices(),
       assigned: Object.fromEntries(
         Object.entries(state.assigned).map(([k, v]) => [k, v ? v.name : null])
@@ -473,6 +585,7 @@ export function createVoiceDirector(options = {}) {
     unlock,
     setEnabled,
     setVolume,
+    setAppLang,
     setRoleVoice,
     setRolePitch,
     setRoleRate,
@@ -486,7 +599,9 @@ export function createVoiceDirector(options = {}) {
       const { rate } = resolvePitchRate(role, 'calm');
       return estimateSpeechSeconds(text, rate);
     },
-    profiles: VOICE_PROFILES,
+    get profiles() {
+      return profiles();
+    },
     PREVIEW_LINES,
   };
 }

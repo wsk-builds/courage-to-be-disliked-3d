@@ -4,14 +4,24 @@
 
 **长期目标：** 将整本《被讨厌的勇气》（五夜对话）做成可旁观、可交互的 3D 世界，**按 Part 分块制作**，人物/场景模型全章一致。
 
-**当前可玩：** **全书 P00–P10**（序章 + 五夜对话 + 雪夜终章）。按原著必呈清单加厚论证；`intensity`/`hold` 驱动镜头与静默。文本为叙事改编，**非原文逐字照搬**。配音：系统 TTS + 选声面板。
+**Playable:** Full **P00–P10** (prologue + five nights + snow ending). Dialogue adapted from Adlerian structure (not a verbatim book edition). **Default UI/dialogue/TTS language: English**, with **EN / 中文** toggle (`L`).
 
-## 在线体验（GitHub Pages）
+**当前可玩：** 全书 P00–P10。**默认英文**（界面、对白、配音），可切换中文。
 
-- **页面：** https://wsk-builds.github.io/courage-to-be-disliked-3d/
-- **仓库：** https://github.com/wsk-builds/courage-to-be-disliked-3d
+## Live (GitHub Pages)
 
-纯静态站点，无需构建。推送到 `main` 后 Pages 会自动更新（约 1–2 分钟）。
+- **Site:** https://wsk-builds.github.io/courage-to-be-disliked-3d/
+- **Repo:** https://github.com/wsk-builds/courage-to-be-disliked-3d
+
+Static site, no build step. Push to `main` → Pages updates in ~1–2 minutes.
+
+### Language
+
+| | |
+|--|--|
+| Default | **English** |
+| Switch | Top-right **EN / 中文**, or key **`L`** |
+| Voices | System TTS; cast panel picks different English personas (philosopher / youth / narrator) |
 
 ### 文档
 

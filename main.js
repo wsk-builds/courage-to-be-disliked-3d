@@ -5,12 +5,31 @@ import {
   LINES,
   CHAPTERS,
   PART_BOUNDARIES,
-  SPEAKER_LABELS,
   getSegmentForLine,
   getPartForLine,
   findPartStart,
 } from './story.js';
 import { createVoiceDirector } from './voice.js';
+import {
+  getLang,
+  setLang,
+  ui,
+  lineText,
+  partTitle,
+  segmentName,
+  registerEnglishLookups,
+} from './i18n/locale.js';
+import {
+  getEnLine,
+  getEnPartTitle,
+  getEnSegmentName,
+} from './content/i18n/en/index.js';
+
+registerEnglishLookups({
+  getLine: getEnLine,
+  getPartTitle: getEnPartTitle,
+  getSegmentName: getEnSegmentName,
+});
 
 // ——— DOM ———
 const canvas = document.getElementById('c');
@@ -31,10 +50,24 @@ const btnCast = document.getElementById('btn-cast');
 const castPanel = document.getElementById('cast-panel');
 const castRows = document.getElementById('cast-rows');
 const castStatus = document.getElementById('cast-status');
+const castTitle = document.getElementById('cast-title');
+const castTip = document.getElementById('cast-tip');
 const castClose = document.getElementById('cast-close');
 const castRefresh = document.getElementById('cast-refresh');
 const castReset = document.getElementById('cast-reset');
 const voiceVolume = document.getElementById('voice-volume');
+const btnLangEn = document.getElementById('btn-lang-en');
+const btnLangZh = document.getElementById('btn-lang-zh');
+const loadingTitle = document.getElementById('loading-title');
+const loadingSubtitle = document.getElementById('loading-subtitle');
+const navToggleLabel = document.getElementById('nav-toggle-label');
+const navTitleEl = document.getElementById('nav-title');
+const navPartsLabel = document.getElementById('nav-parts-label');
+const navSegsLabel = document.getElementById('nav-segs-label');
+const navHintEl = document.getElementById('nav-hint');
+const helpTitleEl = document.getElementById('help-title');
+const helpListEl = document.getElementById('help-list');
+const footerNote = document.getElementById('footer-note');
 const chapterRail = document.getElementById('chapter-rail');
 const partRail = document.getElementById('part-rail');
 const brandPart = document.getElementById('brand-part');
@@ -52,12 +85,11 @@ function setLoad(p, hint) {
 
 function showBootError(err) {
   console.error(err);
-  if (loadingHint) loadingHint.textContent = '启动失败';
+  if (loadingHint) loadingHint.textContent = ui('bootFail');
   if (loadingError) {
     loadingError.hidden = false;
     loadingError.textContent =
-      (err && (err.stack || err.message || String(err))) +
-      '\n\n请用本地服务器打开：\npython serve.py 5173\n然后访问 http://127.0.0.1:5173/';
+      (err && (err.stack || err.message || String(err))) + ui('bootHint');
   }
 }
 
@@ -71,13 +103,13 @@ const CAST_ROLES = ['philosopher', 'youth', 'narrator'];
 const voice = createVoiceDirector({
   enabled: true,
   volume: 1,
+  appLang: getLang(),
   onVoicesChanged: () => {
     if (castPanel && !castPanel.hidden) renderCastPanel();
   },
 });
 let voiceGeneration = 0;
 let currentLineDuration = 6;
-let castChineseOnly = true;
 
 function unlockAudio() {
   voice.unlock();
@@ -87,16 +119,15 @@ function speakCurrentLine() {
   const line = LINES[lineIndex];
   if (!line) return;
   const gen = ++voiceGeneration;
-  const est = voice.estimateSpeechSeconds(line.speaker, line.text);
+  const text = lineText(line);
+  const est = voice.estimateSpeechSeconds(line.speaker, text);
   const hold = typeof line.hold === 'number' ? line.hold : 0;
-  // 台词时长 + 击中后静默（hold）
   currentLineDuration = Math.max(line.duration || 5, est) + hold;
   if (!playing) {
     voice.stop();
     return;
   }
-  // 旁白空镜且烈度高时：短暂切 hold_empty 再回（由 setCameraCue 在 showLine 处理）
-  voice.speak(line.speaker, line.text, line.emotion || 'calm').then(() => {
+  voice.speak(line.speaker, text, line.emotion || 'calm').then(() => {
     void gen;
   });
 }
@@ -104,9 +135,74 @@ function speakCurrentLine() {
 function updateVoiceButton() {
   if (!btnVoice) return;
   const on = voice.getStatus().enabled;
-  btnVoice.textContent = on ? '🔊 配音' : '🔇 静音';
+  btnVoice.textContent = on ? ui('voiceOn') : ui('voiceOff');
   btnVoice.classList.toggle('off', !on);
   btnVoice.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function applyLocale() {
+  const lang = getLang();
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.title = ui('docTitle');
+  if (loadingTitle) loadingTitle.textContent = ui('loadingTitle');
+  if (loadingSubtitle) loadingSubtitle.textContent = ui('loadingSubtitle');
+  if (loadingHint && !loadingEl?.classList.contains('fade-out')) {
+    loadingHint.textContent = ui('loadingHint');
+  }
+  if (btnCast) btnCast.textContent = ui('cast');
+  if (castTitle) castTitle.textContent = ui('castTitle');
+  if (castTip) castTip.innerHTML = ui('castTip');
+  if (castRefresh) castRefresh.textContent = ui('castRefresh');
+  if (castReset) castReset.textContent = ui('castReset');
+  if (navToggleLabel) navToggleLabel.textContent = ui('navLabel');
+  if (navTitleEl) navTitleEl.textContent = ui('navTitle');
+  if (navPartsLabel) navPartsLabel.textContent = ui('navParts');
+  if (navSegsLabel) navSegsLabel.textContent = ui('navSegments');
+  if (navHintEl) navHintEl.innerHTML = ui('navHint');
+  if (helpTitleEl) helpTitleEl.textContent = ui('helpTitle');
+  if (helpListEl) {
+    const items = ui('helpItems') || [];
+    helpListEl.innerHTML = items.map((html) => `<li>${html}</li>`).join('');
+  }
+  if (footerNote) footerNote.textContent = ui('footer');
+  if (btnPrev) btnPrev.title = ui('prev');
+  if (btnNext) btnNext.title = ui('next');
+  if (btnPlay) btnPlay.title = ui('play');
+  if (btnLangEn) btnLangEn.classList.toggle('active', lang === 'en');
+  if (btnLangZh) btnLangZh.classList.toggle('active', lang === 'zh');
+
+  voice.setAppLang(lang);
+  updateVoiceButton();
+  buildPartRail();
+  const partId = getPartForLine(lineIndex) || PART_BOUNDARIES[0]?.partId;
+  if (partId) buildSegmentRail(partId);
+  refreshRailActive();
+
+  // Refresh visible dialogue in new language
+  if (typeof lineIndex === 'number' && LINES[lineIndex]) {
+    const line = LINES[lineIndex];
+    if (speakerEl) {
+      const labels = ui('speakers') || {};
+      speakerEl.textContent = labels[line.speaker] || line.speaker;
+    }
+    if (dialogueEl) {
+      // keep typewriter progress proportionally
+      const full = lineText(line);
+      dialogueEl.textContent = full.slice(0, Math.floor(typewriterLen) || full.length);
+    }
+    updateMinimap(line);
+  }
+  if (castPanel && !castPanel.hidden) renderCastPanel();
+}
+
+function switchLanguage(lang) {
+  if (lang !== 'en' && lang !== 'zh') return;
+  if (lang === getLang()) return;
+  unlockAudio();
+  voice.stop();
+  setLang(lang);
+  applyLocale();
+  if (playing) speakCurrentLine();
 }
 
 function toggleVoice() {
@@ -137,11 +233,15 @@ function toggleCast() {
 function renderCastPanel() {
   if (!castRows) return;
   const info = voice.getCastInfo();
-  const voices = voice.listVoices({ chineseOnly: castChineseOnly });
+  const voices = voice.listVoices();
   if (castStatus) {
     castStatus.textContent = info.ready
-      ? `系统音色 ${info.voiceCount} 个（列表显示 ${voices.length} 个${castChineseOnly ? '·优先中文' : ''}）`
-      : '正在加载系统音色…若为空，请安装中文语音包后点「刷新」';
+      ? getLang() === 'zh'
+        ? `系统音色 ${info.voiceCount} 个（列表 ${voices.length} 个 · 当前语言 ${info.appLang}）`
+        : `System voices: ${info.voiceCount} (showing ${voices.length} · lang ${info.appLang})`
+      : getLang() === 'zh'
+        ? '正在加载系统音色…'
+        : 'Loading system voices…';
   }
 
   castRows.innerHTML = '';
@@ -153,40 +253,36 @@ function renderCastPanel() {
 
     const head = document.createElement('div');
     head.className = 'cast-row-head';
-    head.innerHTML = `<span class="cast-role">${c.label}</span><span class="cast-note">${c.styleNote || ''}${c.manual ? ' · 已手选' : ' · 自动'}</span>`;
+    const tag = c.manual ? ui('castManual') : ui('castAutoTag');
+    head.innerHTML = `<span class="cast-role">${c.label}</span><span class="cast-note">${c.styleNote || ''}${tag}</span>`;
     row.appendChild(head);
 
     const sel = document.createElement('select');
     sel.dataset.role = role;
     const autoOpt = document.createElement('option');
     autoOpt.value = '';
-    autoOpt.textContent = '（自动匹配）';
+    autoOpt.textContent = ui('castAuto');
     sel.appendChild(autoOpt);
 
     for (const v of voices) {
       const opt = document.createElement('option');
       opt.value = v.voiceURI;
-      opt.textContent = `${v.name}  [${v.lang}]${v.localService ? '' : ' ·云'}`;
+      opt.textContent = `${v.name}  [${v.lang}]${v.localService ? '' : ui('castCloud')}`;
       sel.appendChild(opt);
     }
 
-    // If current voice not in filtered list, still show it
     if (c.voiceURI && ![...sel.options].some((o) => o.value === c.voiceURI)) {
       const opt = document.createElement('option');
       opt.value = c.voiceURI;
       opt.textContent = `${c.voiceName || c.voiceURI}  [${c.lang || '?'}]`;
       sel.appendChild(opt);
     }
-    sel.value = c.manual && c.voiceURI ? c.voiceURI : c.voiceURI || '';
-    // If auto, prefer showing actual assigned voice selected for clarity
-    if (!c.manual && c.voiceURI) sel.value = c.voiceURI;
+    if (c.voiceURI) sel.value = c.voiceURI;
 
     sel.addEventListener('change', () => {
       unlockAudio();
-      const uri = sel.value || null;
-      // empty means auto only if user picked the auto option
       if (sel.selectedIndex === 0) voice.setRoleVoice(role, null);
-      else voice.setRoleVoice(role, uri);
+      else voice.setRoleVoice(role, sel.value);
       renderCastPanel();
     });
     row.appendChild(sel);
@@ -196,7 +292,7 @@ function renderCastPanel() {
 
     const pitchLab = document.createElement('label');
     pitchLab.className = 'cast-slider-label';
-    pitchLab.innerHTML = `<span>音高 ${c.pitch.toFixed(2)}</span>`;
+    pitchLab.innerHTML = `<span>${ui('castPitch')} ${c.pitch.toFixed(2)}</span>`;
     const pitchIn = document.createElement('input');
     pitchIn.type = 'range';
     pitchIn.min = '0.6';
@@ -205,13 +301,13 @@ function renderCastPanel() {
     pitchIn.value = String(c.pitch);
     pitchIn.addEventListener('input', () => {
       voice.setRolePitch(role, pitchIn.value);
-      pitchLab.querySelector('span').textContent = `音高 ${Number(pitchIn.value).toFixed(2)}`;
+      pitchLab.querySelector('span').textContent = `${ui('castPitch')} ${Number(pitchIn.value).toFixed(2)}`;
     });
     pitchLab.appendChild(pitchIn);
 
     const rateLab = document.createElement('label');
     rateLab.className = 'cast-slider-label';
-    rateLab.innerHTML = `<span>语速 ${c.rate.toFixed(2)}</span>`;
+    rateLab.innerHTML = `<span>${ui('castRate')} ${c.rate.toFixed(2)}</span>`;
     const rateIn = document.createElement('input');
     rateIn.type = 'range';
     rateIn.min = '0.65';
@@ -220,7 +316,7 @@ function renderCastPanel() {
     rateIn.value = String(c.rate);
     rateIn.addEventListener('input', () => {
       voice.setRoleRate(role, rateIn.value);
-      rateLab.querySelector('span').textContent = `语速 ${Number(rateIn.value).toFixed(2)}`;
+      rateLab.querySelector('span').textContent = `${ui('castRate')} ${Number(rateIn.value).toFixed(2)}`;
     });
     rateLab.appendChild(rateIn);
 
@@ -232,18 +328,12 @@ function renderCastPanel() {
     actions.className = 'cast-row-actions';
     const previewBtn = document.createElement('button');
     previewBtn.type = 'button';
-    previewBtn.textContent = '▶ 试听';
+    previewBtn.textContent = ui('castPreview');
     previewBtn.addEventListener('click', () => {
       unlockAudio();
-      // temporarily ensure enabled
-      const was = voice.getStatus().enabled;
       voice.setEnabled(true);
       updateVoiceButton();
-      voice.preview(role).finally(() => {
-        if (!was) {
-          /* keep enabled after audition — user is choosing voices */
-        }
-      });
+      voice.preview(role);
     });
     actions.appendChild(previewBtn);
     row.appendChild(actions);
@@ -257,7 +347,22 @@ let railPartId = null;
 const NAV_KEY = 'courage-nav-collapsed';
 
 function shortPartTitle(title) {
-  return String(title || '')
+  const s = String(title || '');
+  if (getLang() === 'en') {
+    return s
+      .replace(/^Prologue\s*[·・]\s*/i, 'Prologue · ')
+      .replace(/^Night One\s*[·・]\s*Part\s*1[:\s]*/i, 'N1 · ')
+      .replace(/^Night One\s*[·・]\s*Part\s*2[:\s]*/i, 'N1b · ')
+      .replace(/^Night Two\s*[·・]\s*Part\s*(One|1)[:\s]*/i, 'N2 · ')
+      .replace(/^Night Two\s*[·・]\s*Part\s*(Two|2)[:\s]*/i, 'N2b · ')
+      .replace(/^Night Three\s*[·・]\s*Part\s*(I|1)[:\s]*/i, 'N3 · ')
+      .replace(/^Night Three\s*[·・]\s*Part\s*(II|2)[:\s]*/i, 'N3b · ')
+      .replace(/^Night Four\s*[·・]\s*Part\s*1[:\s]*/i, 'N4 · ')
+      .replace(/^Night Four\s*[·・]\s*Part\s*2[:\s]*/i, 'N4b · ')
+      .replace(/^Night Five\s*[·・]\s*Part\s*1[:\s]*/i, 'N5 · ')
+      .replace(/^Night Five\s*[·・]\s*Part\s*2[:\s]*/i, 'N5b · ');
+  }
+  return s
     .replace(/^序章\s*[·・]\s*/, '序章 · ')
     .replace(/第一夜\s*[·・]\s*上[：:]?\s*/, '一上 · ')
     .replace(/第一夜\s*[·・]\s*下[：:]?\s*/, '一下 · ')
@@ -268,12 +373,7 @@ function shortPartTitle(title) {
     .replace(/第四夜\s*[·・]\s*上[：:]?\s*/, '四上 · ')
     .replace(/第四夜\s*[·・]\s*下[：:]?\s*/, '四下 · ')
     .replace(/第五夜\s*[·・]\s*上[：:]?\s*/, '五上 · ')
-    .replace(/第五夜\s*[·・]\s*下[：:]?\s*/, '五下 · ')
-    .replace(/第一夜\s*[·・]\s*/, '一 · ')
-    .replace(/第二夜\s*[·・]\s*/, '二 · ')
-    .replace(/第三夜\s*[·・]\s*/, '三 · ')
-    .replace(/第四夜\s*[·・]\s*/, '四 · ')
-    .replace(/第五夜\s*[·・]\s*/, '五 · ');
+    .replace(/第五夜\s*[·・]\s*下[：:]?\s*/, '五下 · ');
 }
 
 function setNavCollapsed(collapsed) {
@@ -310,8 +410,9 @@ function buildPartRail() {
     btn.type = 'button';
     btn.className = 'part-btn';
     btn.dataset.partId = b.partId;
-    btn.textContent = shortPartTitle(b.title);
-    btn.title = b.title;
+    const full = partTitle(b.partId, b.title);
+    btn.textContent = shortPartTitle(full);
+    btn.title = full;
     btn.addEventListener('click', () => {
       unlockAudio();
       jumpToPart(b.partId);
@@ -332,8 +433,11 @@ function buildSegmentRail(partId) {
     btn.className = 'chapter';
     btn.dataset.chapter = String(c.id);
     btn.dataset.key = c.key;
-    btn.textContent = c.name.replace(/^P0\d\s+/, '');
-    btn.title = c.name;
+    // c.name is "P0x ChineseName" from assemble — strip id, localize
+    const zhSeg = String(c.name).replace(/^P0\d\s+/, '');
+    const label = segmentName(partId, c.segmentId, zhSeg);
+    btn.textContent = label;
+    btn.title = label;
     btn.addEventListener('click', () => {
       unlockAudio();
       jumpToSegment(c.id);
@@ -391,9 +495,10 @@ function refreshRailActive() {
   }
   const boundary = PART_BOUNDARIES.find((p) => p.partId === partId);
   if (brandPart) {
+    const base = ui('brandDefault');
     brandPart.textContent = boundary
-      ? `被讨厌的勇气 · ${boundary.title}`
-      : '被讨厌的勇气 · 旁观模式';
+      ? `${base} · ${partTitle(boundary.partId, boundary.title)}`
+      : base;
   }
 }
 
@@ -453,6 +558,7 @@ try {
 }
 
 buildRails();
+applyLocale();
 
 // ——— Controls ———
 const keys = new Set();
@@ -564,14 +670,8 @@ function applyIntensityBody(line) {
 
 function updateMinimap(line) {
   if (!minimapLabel) return;
-  const map = {
-    exterior: '千年古都 · 郊外',
-    door: '哲学家居所 · 门廊',
-    study: '哲学家书房 · 夜谈',
-    closeup: '书房 · 对谈',
-    snow: '门外 · 新雪',
-  };
-  minimapLabel.textContent = map[line.camera] || '千年古都 · 郊外';
+  const map = ui('minimap') || {};
+  minimapLabel.textContent = map[line.camera] || map.exterior || '';
 }
 
 // ——— Story state ———
@@ -690,7 +790,8 @@ function showLine(index, resetTime = true) {
   typewriterLen = 0;
   displayedText = '';
   dialogueEl.textContent = '';
-  speakerEl.textContent = SPEAKER_LABELS[line.speaker] || '';
+  const labels = ui('speakers') || {};
+  speakerEl.textContent = labels[line.speaker] || line.speaker;
 
   applyNightPhase(line.nightPhase || 'prologue');
   updateMinimap(line);
@@ -874,6 +975,10 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     toggleCast();
   }
+  if (e.code === 'KeyL') {
+    e.preventDefault();
+    switchLanguage(getLang() === 'en' ? 'zh' : 'en');
+  }
   if (e.code === 'KeyC') {
     e.preventDefault();
     toggleNav();
@@ -888,7 +993,11 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyR') {
     followDialogue = true;
-    setCameraCue(LINES[lineIndex].camera || 'study');
+    const ln = LINES[lineIndex];
+    setCameraCue(ln?.camera || 'study', {
+      intensity: ln?.intensity || 2,
+      speaker: ln?.speaker,
+    });
   }
   if (e.code === 'KeyF') {
     followDialogue = !followDialogue;
@@ -946,6 +1055,12 @@ btnPrev.addEventListener('click', () => {
 if (btnVoice) {
   btnVoice.addEventListener('click', toggleVoice);
   updateVoiceButton();
+}
+if (btnLangEn) {
+  btnLangEn.addEventListener('click', () => switchLanguage('en'));
+}
+if (btnLangZh) {
+  btnLangZh.addEventListener('click', () => switchLanguage('zh'));
 }
 if (btnCast) {
   btnCast.addEventListener('click', () => {
@@ -1034,7 +1149,7 @@ function updateCinematicCamera(dt) {
 
 function updateTypewriter(dt) {
   const line = LINES[lineIndex];
-  const full = line.text;
+  const full = lineText(line);
   const charsPerSec = Math.max(12, full.length / Math.max(2.5, currentLineDuration * 0.85));
   typewriterLen = Math.min(full.length, typewriterLen + dt * charsPerSec);
   const next = full.slice(0, Math.floor(typewriterLen));
