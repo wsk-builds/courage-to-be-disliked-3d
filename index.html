@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>被讨厌的勇气 · 旁观世界</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="loading">
+    <div class="loading-inner">
+      <div class="title-jp">嫌われる勇気</div>
+      <div class="title-cn">被讨厌的勇气</div>
+      <div class="subtitle">一个可旁观的阿德勒哲学世界</div>
+      <div class="loading-bar"><div class="loading-fill" id="loading-fill"></div></div>
+      <div class="loading-hint" id="loading-hint">正在构筑书房与夜色…</div>
+      <div class="loading-error" id="loading-error" hidden></div>
+    </div>
+  </div>
+
+  <div id="ui" class="hidden">
+    <header id="top-bar">
+      <div class="brand">
+        <span class="brand-mark">◎</span>
+        <span id="brand-part">被讨厌的勇气 · 序章</span>
+      </div>
+      <div class="top-right">
+        <div class="voice-panel" id="voice-panel" title="配音（系统中文语音）">
+          <button type="button" id="btn-voice" class="voice-btn" aria-pressed="true">🔊 配音</button>
+          <button type="button" id="btn-cast" class="voice-btn" title="为角色选择系统音色 (V)">🎙 选声</button>
+          <input type="range" id="voice-volume" min="0" max="100" value="100" aria-label="音量" />
+        </div>
+        <button type="button" id="btn-help" class="icon-btn" title="快捷键 (H)" aria-expanded="false">?</button>
+      </div>
+    </header>
+
+    <!-- 系统音色选择：试听并分配给哲学家 / 青年 / 旁白 -->
+    <div id="cast-panel" class="cast-panel" hidden>
+      <div class="cast-head">
+        <div>
+          <div class="cast-title">角色选声</div>
+          <div class="cast-sub" id="cast-status">使用浏览器系统语音 · 可试听后保存</div>
+        </div>
+        <button type="button" id="cast-close" class="nav-collapse" title="关闭">×</button>
+      </div>
+      <p class="cast-tip">
+        是的，当前就是<strong>浏览器自带 TTS</strong>。音色取决于本机安装了哪些语音包（Windows：设置 → 时间和语言 → 语音）。
+        选好后会记住；按 <kbd>V</kbd> 可随时打开本面板。
+      </p>
+      <div id="cast-rows" class="cast-rows"></div>
+      <div class="cast-actions">
+        <button type="button" id="cast-refresh" class="cast-action">刷新音色列表</button>
+        <button type="button" id="cast-reset" class="cast-action ghost">恢复自动分配</button>
+      </div>
+    </div>
+
+    <!-- 左侧可折叠目录：章节 + 当前章段落 -->
+    <aside id="story-nav" class="story-nav" aria-label="故事目录">
+      <button type="button" id="nav-toggle" class="nav-toggle" title="展开/收起目录 (C)">
+        <span class="nav-toggle-icon">☰</span>
+        <span class="nav-toggle-label">目录</span>
+      </button>
+      <div class="nav-panel">
+        <div class="nav-head">
+          <span class="nav-title">故事目录</span>
+          <button type="button" id="nav-collapse" class="nav-collapse" title="收起">‹</button>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">章节</div>
+          <div id="part-rail" class="nav-list" role="listbox" aria-label="章节"></div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">本段</div>
+          <div id="chapter-rail" class="nav-list" role="listbox" aria-label="段落"></div>
+        </div>
+        <p class="nav-hint">快捷键 <kbd>C</kbd> 开合目录 · <kbd>[ ]</kbd> 换章 · <kbd>1-9</kbd> 换段</p>
+      </div>
+    </aside>
+
+    <!-- 快捷键说明：默认隐藏，点 ? 打开 -->
+    <div id="help-panel" class="help-panel" hidden>
+      <div class="help-title">操作说明</div>
+      <ul class="help-list">
+        <li><kbd>W A S D</kbd> 移动 · <kbd>Q E</kbd> 升降 · <kbd>Shift</kbd> 加速</li>
+        <li><kbd>点击画面</kbd> 锁定鼠标环顾</li>
+        <li><kbd>空格</kbd> 播放 / 暂停</li>
+        <li><kbd>← →</kbd> 上一句 / 下一句</li>
+        <li><kbd>C</kbd> 打开 / 收起目录</li>
+        <li><kbd>[ ]</kbd> 上一章 / 下一章</li>
+        <li><kbd>1-9</kbd> 当前章内第 n 段</li>
+        <li><kbd>M</kbd> 配音开关 · <kbd>V</kbd> 角色选声</li>
+        <li><kbd>R</kbd> 电影镜头 · <kbd>F</kbd> 跟随/自由</li>
+        <li><kbd>H</kbd> 或 <kbd>?</kbd> 关闭本面板</li>
+      </ul>
+    </div>
+
+    <div id="dialogue-panel">
+      <div id="speaker" class="speaker"></div>
+      <div id="dialogue-text" class="dialogue-text"></div>
+      <div id="dialogue-progress">
+        <div id="dialogue-progress-fill"></div>
+      </div>
+    </div>
+
+    <div id="story-controls">
+      <button id="btn-prev" title="上一句">‹</button>
+      <button id="btn-play" title="播放/暂停">▶</button>
+      <button id="btn-next" title="下一句">›</button>
+      <span id="line-counter">0 / 0</span>
+    </div>
+
+    <div id="minimap-label">千年古都 · 郊外</div>
+
+    <footer id="footer-note">
+      改编自《被讨厌的勇气》思想结构 · 非原文照搬 · 全书 P00–P10
+    </footer>
+  </div>
+
+  <canvas id="c"></canvas>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
