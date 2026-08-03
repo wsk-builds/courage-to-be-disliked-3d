@@ -1054,8 +1054,21 @@ document.addEventListener('mousemove', (e) => {
   if (!pointerLocked) return;
   look.yaw -= e.movementX * 0.0022;
   look.pitch -= e.movementY * 0.0022;
-  look.pitch = Math.max(-1.4, Math.min(1.4, look.pitch));
+  look.pitch = Math.max(-1.45, Math.min(1.45, look.pitch));
 });
+
+// Mouse wheel: change altitude in free-explore mode (discoverable up/down)
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    if (followDialogue && !pointerLocked) return;
+    e.preventDefault();
+    // scroll up → rise, scroll down → lower
+    camera.position.y += e.deltaY > 0 ? -0.55 : 0.55;
+    clampFreeCameraY();
+  },
+  { passive: false },
+);
 
 btnPlay.addEventListener('click', togglePlay);
 btnNext.addEventListener('click', () => {
@@ -1121,29 +1134,54 @@ window.addEventListener('resize', () => {
 // ——— Camera loop helpers ———
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
 const _lookTarget = new THREE.Vector3();
+/** Free-explore altitude: wheel / QE can raise and lower the camera. */
+const FREE_Y_MIN = 0.25;
+const FREE_Y_MAX = 48;
 
+function clampFreeCameraY() {
+  camera.position.y = Math.max(FREE_Y_MIN, Math.min(FREE_Y_MAX, camera.position.y));
+}
+
+/**
+ * Free-fly spectator cam (not stuck to a ground plane).
+ * - W/S: along look direction (includes pitch → climb/dive by looking up/down)
+ * - A/D: horizontal strafe
+ * - Q/E, PageUp/PageDown, Ctrl: world up/down
+ * - Mouse wheel: quick altitude change
+ */
 function updateFreeCamera(dt) {
-  const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 6.5 : 3.2;
+  const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8.5 : 4.0;
   wish.set(0, 0, 0);
   if (keys.has('KeyW')) wish.z -= 1;
   if (keys.has('KeyS')) wish.z += 1;
   if (keys.has('KeyA')) wish.x -= 1;
   if (keys.has('KeyD')) wish.x += 1;
-  if (keys.has('KeyQ')) wish.y -= 1;
-  if (keys.has('KeyE')) wish.y += 1;
+  // World vertical: Q down, E up; also Ctrl down / C not used; PageDown/PageUp
+  if (keys.has('KeyQ') || keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('PageDown')) {
+    wish.y -= 1;
+  }
+  if (keys.has('KeyE') || keys.has('PageUp')) {
+    wish.y += 1;
+  }
 
-  _fwd.set(-Math.sin(look.yaw), 0, -Math.cos(look.yaw));
+  // Full look-forward (with pitch) so free explore is not locked to a flat plane
+  const cosP = Math.cos(look.pitch);
+  const sinP = Math.sin(look.pitch);
+  _fwd.set(-Math.sin(look.yaw) * cosP, sinP, -Math.cos(look.yaw) * cosP);
+  // Strafe stays level so A/D does not drift in altitude unexpectedly
   _right.set(Math.cos(look.yaw), 0, -Math.sin(look.yaw));
 
   const move = new THREE.Vector3();
+  // wish.z: W is -1 → move along +_fwd (forward)
   if (wish.z) move.addScaledVector(_fwd, -wish.z);
   if (wish.x) move.addScaledVector(_right, wish.x);
-  if (wish.y) move.y += wish.y;
+  if (wish.y) move.addScaledVector(_worldUp, wish.y);
   if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
 
   camera.position.add(move);
-  camera.position.y = Math.max(0.4, Math.min(12, camera.position.y));
+  clampFreeCameraY();
 
   const lx = camera.position.x - Math.sin(look.yaw) * Math.cos(look.pitch);
   const ly = camera.position.y + Math.sin(look.pitch);

@@ -118,8 +118,9 @@ export const UI = {
     navHint: '<kbd>C</kbd> menu · <kbd>[ ]</kbd> chapter · <kbd>1-9</kbd> scene',
     helpTitle: 'Controls',
     helpItems: [
-      '<kbd>W A S D</kbd> move · <kbd>Q E</kbd> up/down · <kbd>Shift</kbd> sprint',
-      '<kbd>Click canvas</kbd> lock mouse look',
+      '<kbd>W A S D</kbd> free-fly (look direction) · <kbd>Shift</kbd> sprint',
+      '<kbd>Q E</kbd> or <kbd>PgUp/PgDn</kbd> altitude · <kbd>Wheel</kbd> rise/lower',
+      '<kbd>Click canvas</kbd> lock mouse look (free explore)',
       '<kbd>Space</kbd> play / pause',
       '<kbd>← →</kbd> prev / next line',
       '<kbd>C</kbd> open / close menu',
@@ -187,8 +188,9 @@ export const UI = {
     navHint: '快捷键 <kbd>C</kbd> 开合目录 · <kbd>[ ]</kbd> 换章 · <kbd>1-9</kbd> 换段',
     helpTitle: '操作说明',
     helpItems: [
-      '<kbd>W A S D</kbd> 移动 · <kbd>Q E</kbd> 升降 · <kbd>Shift</kbd> 加速',
-      '<kbd>点击画面</kbd> 锁定鼠标环顾',
+      '<kbd>W A S D</kbd> 自由飞行（沿视线）· <kbd>Shift</kbd> 加速',
+      '<kbd>Q E</kbd> 或 <kbd>PgUp/PgDn</kbd> 升降 · <kbd>滚轮</kbd> 快速调高度',
+      '<kbd>点击画面</kbd> 锁定鼠标环顾（自由探索）',
       '<kbd>空格</kbd> 播放 / 暂停',
       '<kbd>← →</kbd> 上一句 / 下一句',
       '<kbd>C</kbd> 打开 / 收起目录',
