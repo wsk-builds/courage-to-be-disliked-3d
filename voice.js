@@ -1,121 +1,104 @@
 /**
- * Multi-character Chinese TTS via Web Speech API.
- * Supports auto-assign + manual pick with localStorage persistence.
+ * Multi-character TTS via Web Speech API.
+ * Language-strict casting + cancel/speak race fixes for Chrome/Edge/Windows.
  */
 
 /** @typedef {'narrator' | 'philosopher' | 'youth' | string} VoiceRole */
 
+const STORAGE_KEY = 'courage-voice-cast-v3';
+
 /**
- * @typedef {Object} VoiceProfile
- * @property {string} label
- * @property {number} pitch
- * @property {number} rate
- * @property {number} volume
- * @property {string[]} preferName
- * @property {string[]} avoidName
- * @property {'male'|'female'|'any'} gender
- * @property {string} styleNote
+ * Safer pitch/rate ranges — extreme pitch (e.g. 0.72 / 1.14) is silent on many SAPI voices.
  */
-
-const STORAGE_KEY = 'courage-voice-cast-v2';
-
-/** Chinese system-voice casting heuristics */
 const PROFILES_ZH = {
   narrator: {
     label: '旁白',
-    pitch: 0.95,
+    pitch: 1.0,
     rate: 0.92,
-    volume: 0.88,
-    preferName: ['huihui', 'yaoyao', 'xiaoxiao', 'xiaoyi', 'female', 'zira', 'susan'],
-    avoidName: ['kangkang', 'zhiwei', 'david', 'mark'],
+    volume: 1.0,
+    preferName: ['huihui', 'yaoyao', 'xiaoxiao', 'xiaoyi', 'xiaoyan', 'female'],
+    avoidName: ['kangkang', 'zhiwei', 'yunyang'],
     gender: 'female',
-    styleNote: '沉稳纪录片旁白，略柔、节奏从容',
+    styleNote: '沉稳旁白',
   },
   philosopher: {
     label: '哲学家',
-    pitch: 0.72,
-    rate: 0.82,
+    pitch: 0.92,
+    rate: 0.88,
     volume: 1.0,
-    preferName: ['kangkang', 'zhiwei', 'yunjian', 'yunxi', 'yunye', 'male', 'david', 'mark', 'richard'],
-    avoidName: ['yaoyao', 'huihui', 'zira'],
+    preferName: ['kangkang', 'zhiwei', 'yunjian', 'yunye', 'yunxi', 'male'],
+    avoidName: ['huihui', 'yaoyao', 'xiaoxiao'],
     gender: 'male',
-    styleNote: '年长学者：低沉、缓慢、留白多',
+    styleNote: '年长、偏慢',
   },
   youth: {
     label: '青年',
-    pitch: 1.12,
-    rate: 1.06,
+    pitch: 1.05,
+    rate: 1.05,
     volume: 1.0,
-    preferName: ['yunyang', 'yunfeng', 'xiaoshuang', 'male', 'guy', 'james'],
-    avoidName: ['kangkang', 'zhiwei'],
+    // Prefer a *different* male from philosopher; do NOT exclude all common males
+    preferName: ['yunyang', 'yunfeng', 'xiaoshuang', 'yunxia', 'male'],
+    avoidName: ['huihui', 'yaoyao', 'xiaoxiao', 'female'],
     gender: 'male',
-    styleNote: '年轻气盛：偏高、偏快，质问感',
+    styleNote: '年轻、略快',
   },
   guest: {
     label: '访客',
     pitch: 1.0,
     rate: 1.0,
-    volume: 0.95,
+    volume: 1.0,
     preferName: [],
     avoidName: [],
     gender: 'any',
-    styleNote: '中性默认',
+    styleNote: '',
   },
 };
 
-/**
- * English casting: distinct personas for native-like delivery.
- * Philosopher: older, measured (David/James/George/Male low pitch)
- * Youth: brighter, quicker (Guy/Mark/higher male — avoid same as philosopher)
- * Narrator: clear, documentary (female Zira/Susan/Jenny or calm male)
- */
 const PROFILES_EN = {
   narrator: {
     label: 'Narrator',
-    pitch: 0.98,
-    rate: 0.94,
-    volume: 0.9,
-    preferName: ['zira', 'susan', 'jenny', 'aria', 'sara', 'female', 'samantha', 'moira', 'victoria'],
-    avoidName: ['david', 'mark', 'george', 'ravi'],
+    pitch: 1.0,
+    rate: 0.95,
+    volume: 1.0,
+    preferName: ['zira', 'susan', 'jenny', 'aria', 'sara', 'samantha', 'female'],
+    avoidName: ['david', 'mark', 'george'],
     gender: 'female',
-    styleNote: 'Calm documentary narrator — clear, unhurried',
+    styleNote: 'Clear documentary narrator',
   },
   philosopher: {
     label: 'Philosopher',
-    pitch: 0.78,
-    rate: 0.84,
+    pitch: 0.95,
+    rate: 0.9,
     volume: 1.0,
-    preferName: ['david', 'george', 'james', 'daniel', 'richard', 'male', 'alex', 'ryan'],
+    preferName: ['david', 'james', 'george', 'daniel', 'richard', 'male'],
     avoidName: ['zira', 'susan', 'jenny', 'aria'],
     gender: 'male',
-    styleNote: 'Older scholar — low, slow, deliberate pauses',
+    styleNote: 'Older, measured male',
   },
   youth: {
     label: 'Youth',
-    pitch: 1.14,
-    rate: 1.08,
+    pitch: 1.06,
+    rate: 1.06,
     volume: 1.0,
     preferName: ['mark', 'guy', 'justin', 'steffan', 'sam', 'male'],
-    avoidName: ['david', 'george', 'zira', 'susan'],
+    avoidName: ['zira', 'susan', 'jenny'],
     gender: 'male',
-    styleNote: 'Restless young man — brighter, quicker, edged',
+    styleNote: 'Younger, brighter male',
   },
   guest: {
     label: 'Guest',
     pitch: 1.0,
     rate: 1.0,
-    volume: 0.95,
+    volume: 1.0,
     preferName: [],
     avoidName: [],
     gender: 'any',
-    styleNote: 'Neutral default',
+    styleNote: '',
   },
 };
 
-/** @type {Record<string, VoiceProfile>} */
 export let VOICE_PROFILES = { ...PROFILES_EN };
 
-/** Sample lines for audition */
 export const PREVIEW_LINES = {
   zh: {
     narrator: '在这座有着千年历史的古城郊外，住着一位哲学家。',
@@ -133,78 +116,81 @@ function speechLangCode(appLang) {
   return appLang === 'zh' ? 'zh-CN' : 'en-US';
 }
 
-/** True if this system voice should be used for the app language */
-function matchesAppLang(voice, appLang) {
+export function matchesAppLang(voice, appLang) {
   if (!voice) return false;
-  const blob = `${voice.name} ${voice.lang}`.toLowerCase();
+  const lang = String(voice.lang || '');
+  const name = String(voice.name || '');
+  const blob = `${name} ${lang}`.toLowerCase();
+
   if (appLang === 'zh') {
     return (
-      /^zh\b/i.test(voice.lang) ||
-      /zh[-_]/i.test(voice.lang) ||
+      /^zh\b/i.test(lang) ||
+      /zh[-_]/i.test(lang) ||
       /chinese|中文|中国|hong kong|taiwan|cantonese|mandarin/i.test(blob)
     );
   }
-  // English: require clear English signal — never treat Chinese voices as EN
-  if (/zh|chinese|中文|中国|hong kong|taiwan|japan|korea|deutsch|france|espa/i.test(blob) && !/en[-_]|english/i.test(blob)) {
+
+  // Exclude clearly non-English first
+  if (
+    /chinese|中文|日本|한국|deutsch|français|español|zh-|ja-|ko-|de-|fr-|es-/i.test(blob) &&
+    !/english|en[-_]|en\b/i.test(blob)
+  ) {
     return false;
   }
   return (
-    /^en\b/i.test(voice.lang) ||
-    /en[-_]/i.test(voice.lang) ||
-    /english|united states|united kingdom|great britain|australia|ireland|canada|new zealand|india/i.test(blob)
+    /^en\b/i.test(lang) ||
+    /en[-_]/i.test(lang) ||
+    /english|united states|united kingdom|great britain|australia|ireland|canada|new zealand/i.test(
+      blob
+    )
   );
 }
 
 export function cleanSpeechText(text, lang = 'en') {
   if (!text) return '';
-  let s = String(text)
+  return String(text)
     .replace(/（[^）]*）/g, '')
     .replace(/\([^)]*\)/g, '')
     .replace(/[—–]/g, lang === 'zh' ? '，' : ', ')
     .replace(/…+/g, lang === 'zh' ? '。' : '...')
     .replace(/\s+/g, ' ')
     .trim();
-  return s;
 }
 
-export function estimateSpeechSeconds(text, rate = 1) {
-  const t = cleanSpeechText(text);
-  const chars = t.replace(/\s/g, '').length;
-  return Math.max(1.2, (chars / 3.8) / Math.max(0.5, rate) + 0.45);
-}
-
-function scoreVoice(voice, profile, usedVoiceURIs, appLang = 'en') {
-  const name = `${voice.name} ${voice.lang}`.toLowerCase();
-  let score = 0;
-  if (appLang === 'zh') {
-    if (/^zh(-|_)/i.test(voice.lang) || /chinese|中文|中国/i.test(name)) score += 50;
-    else if (/zh/i.test(voice.lang)) score += 40;
-    else score -= 20;
-  } else {
-    if (/^en(-|_)/i.test(voice.lang) || /english|united states|united kingdom|australia|ireland|india/i.test(name))
-      score += 50;
-    else if (/en/i.test(voice.lang)) score += 40;
-    else score -= 25;
+export function estimateSpeechSeconds(text, rate = 1, appLang = 'en') {
+  const t = cleanSpeechText(text, appLang);
+  if (!t) return 1.2;
+  if (appLang === 'en') {
+    const words = t.split(/\s+/).filter(Boolean).length;
+    return Math.max(1.4, words / 2.5 / Math.max(0.5, rate) + 0.45);
   }
+  const chars = t.replace(/\s/g, '').length;
+  return Math.max(1.2, chars / 3.8 / Math.max(0.5, rate) + 0.45);
+}
+
+function scoreVoice(voice, profile, usedVoiceURIs, appLang) {
+  if (!matchesAppLang(voice, appLang)) return -1000;
+  const name = `${voice.name} ${voice.lang}`.toLowerCase();
+  let score = 10;
+  if (matchesAppLang(voice, appLang)) score += 40;
 
   for (const p of profile.preferName || []) {
-    if (name.includes(p.toLowerCase())) score += 25;
+    if (name.includes(String(p).toLowerCase())) score += 20;
   }
   for (const a of profile.avoidName || []) {
-    if (name.includes(a.toLowerCase())) score -= 15;
+    if (name.includes(String(a).toLowerCase())) score -= 12;
   }
-
   if (profile.gender === 'female') {
-    if (/female|woman|huihui|yaoyao|xiaoxiao|xiaoyi|zira|susan|linda|ting/i.test(name)) score += 12;
-    if (/male|man|kangkang|zhiwei|david|mark|guy/i.test(name)) score -= 8;
+    if (/female|woman|zira|susan|jenny|aria|huihui|yaoyao|xiaoxiao/i.test(name)) score += 10;
+    if (/male|\bman\b|david|mark|kangkang|zhiwei/i.test(name)) score -= 6;
   }
   if (profile.gender === 'male') {
-    if (/male|man|kangkang|zhiwei|yunjian|yunyang|david|mark|guy|richard/i.test(name)) score += 12;
-    if (/female|woman|huihui|yaoyao|zira/i.test(name)) score -= 8;
+    if (/male|\bman\b|david|mark|james|george|kangkang|zhiwei|yunyang/i.test(name)) score += 10;
+    if (/female|woman|zira|susan|huihui|yaoyao/i.test(name)) score -= 6;
   }
-
-  if (usedVoiceURIs.has(voice.voiceURI)) score -= 10;
-  if (voice.localService) score += 5;
+  // Soft penalty for reuse — never hard-block (one-voice systems must still speak)
+  if (usedVoiceURIs.has(voice.voiceURI)) score -= 8;
+  if (voice.localService) score += 4;
   return score;
 }
 
@@ -226,25 +212,33 @@ function saveCast(payload) {
   }
 }
 
+function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitForSynthIdle(synth, maxMs = 1500) {
+  const start = performance.now();
+  while (synth.speaking || synth.pending) {
+    if (performance.now() - start > maxMs) break;
+    await wait(40);
+  }
+  // Extra beat — Chrome still drops speak() if called too soon after idle
+  await wait(30);
+}
+
 export function createVoiceDirector(options = {}) {
   const saved = loadSavedCast();
   const state = {
     enabled: options.enabled !== false,
     unlocked: false,
     volume: options.volume ?? 1,
-    /** app content language drives TTS language + voice heuristics */
     appLang: options.appLang === 'zh' ? 'zh' : 'en',
     voices: [],
     /** @type {Record<string, SpeechSynthesisVoice|null>} */
-    assigned: {},
-    /** manual overrides per language: { en: { philosopher: uri }, zh: {...} } */
-    /** @type {Record<string, Record<string, string>>} */
-    manualUriByLang: saved.urisByLang || { en: { ...(saved.uris || {}) }, zh: {} },
-    /** @type {Record<string, Record<string, number>>} */
-    manualPitchByLang: saved.pitchByLang || { en: { ...(saved.pitch || {}) }, zh: {} },
-    /** @type {Record<string, Record<string, number>>} */
-    manualRateByLang: saved.rateByLang || { en: { ...(saved.rate || {}) }, zh: {} },
-    current: null,
+    assigned: { narrator: null, philosopher: null, youth: null },
+    manualUriByLang: saved.urisByLang || { en: {}, zh: {} },
+    manualPitchByLang: saved.pitchByLang || { en: {}, zh: {} },
+    manualRateByLang: saved.rateByLang || { en: {}, zh: {} },
     speaking: false,
     onStart: options.onStart || null,
     onEnd: options.onEnd || null,
@@ -253,25 +247,29 @@ export function createVoiceDirector(options = {}) {
     ready: false,
   };
 
+  let jobId = 0;
+  /** @type {null | { id: number, resolve: Function }} */
+  let activeJob = null;
+
+  const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+
   function profiles() {
     return state.appLang === 'zh' ? PROFILES_ZH : PROFILES_EN;
   }
-  function manualUri() {
+  function manualUriMap() {
     if (!state.manualUriByLang[state.appLang]) state.manualUriByLang[state.appLang] = {};
     return state.manualUriByLang[state.appLang];
   }
-  function manualPitch() {
+  function manualPitchMap() {
     if (!state.manualPitchByLang[state.appLang]) state.manualPitchByLang[state.appLang] = {};
     return state.manualPitchByLang[state.appLang];
   }
-  function manualRate() {
+  function manualRateMap() {
     if (!state.manualRateByLang[state.appLang]) state.manualRateByLang[state.appLang] = {};
     return state.manualRateByLang[state.appLang];
   }
 
   VOICE_PROFILES = { ...profiles() };
-
-  const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
 
   function persist() {
     saveCast({
@@ -281,48 +279,45 @@ export function createVoiceDirector(options = {}) {
     });
   }
 
+  function langPool() {
+    return state.voices.filter((v) => matchesAppLang(v, state.appLang));
+  }
+
   function applyManualThenAuto() {
     VOICE_PROFILES = { ...profiles() };
+    const pack = profiles();
     const used = new Set();
     const roles = ['philosopher', 'youth', 'narrator'];
-    const uris = manualUri();
-    const pool = state.voices.filter((v) => matchesAppLang(v, state.appLang));
+    const uris = manualUriMap();
+    const pool = langPool();
 
     for (const role of roles) {
+      state.assigned[role] = null;
       const uri = uris[role];
-      if (uri) {
-        const v = state.voices.find((x) => x.voiceURI === uri) || null;
-        // Drop manual pick if it doesn't match current language (avoids silent EN with ZH voice)
-        if (v && matchesAppLang(v, state.appLang)) {
-          state.assigned[role] = v;
-          used.add(v.voiceURI);
-        } else {
-          state.assigned[role] = null;
-        }
-      } else {
-        state.assigned[role] = null;
+      if (!uri) continue;
+      const v = state.voices.find((x) => x.voiceURI === uri);
+      if (v && matchesAppLang(v, state.appLang)) {
+        state.assigned[role] = v;
+        used.add(v.voiceURI);
       }
     }
 
     for (const role of roles) {
       if (state.assigned[role]) continue;
-      const profile = VOICE_PROFILES[role] || VOICE_PROFILES.guest;
-      const ranked = [...pool]
+      const profile = pack[role] || pack.guest;
+      const ranked = pool
         .map((v) => ({ v, s: scoreVoice(v, profile, used, state.appLang) }))
         .sort((a, b) => b.s - a.s);
-      const best = ranked[0]?.v || null;
-      // Only assign if score is not terrible (must be same language pool already)
+      const best = ranked[0]?.v || pool[0] || null;
       state.assigned[role] = best;
       if (best) used.add(best.voiceURI);
     }
-  }
 
-  function setAppLang(lang) {
-    state.appLang = lang === 'zh' ? 'zh' : 'en';
-    // Re-fetch voices (Chrome often populates late / after lang change)
-    if (synth) state.voices = synth.getVoices() || state.voices;
-    applyManualThenAuto();
-    if (state.onVoicesChanged) state.onVoicesChanged(getCastInfo());
+    // Guarantee youth has *a* voice even if only one male exists
+    if (!state.assigned.youth && pool.length) {
+      state.assigned.youth =
+        state.assigned.philosopher || state.assigned.narrator || pool[0];
+    }
   }
 
   function refreshVoices() {
@@ -330,22 +325,38 @@ export function createVoiceDirector(options = {}) {
     state.voices = synth.getVoices() || [];
     applyManualThenAuto();
     state.ready = state.voices.length > 0;
-    if (state.onVoicesChanged) state.onVoicesChanged(getCastInfo());
+    if (state.onVoicesChanged) {
+      try {
+        state.onVoicesChanged(getCastInfo());
+      } catch (_) {
+        /* ignore */
+      }
+    }
   }
 
-  function registerRole(role, profile) {
-    const pack = profiles();
-    pack[role] = { ...pack.guest, ...profile, label: profile.label || role };
-    VOICE_PROFILES = { ...pack };
-    if (state.voices.length) applyManualThenAuto();
+  function setAppLang(lang) {
+    state.appLang = lang === 'zh' ? 'zh' : 'en';
+    if (synth) {
+      try {
+        synth.cancel();
+      } catch (_) {
+        /* ignore */
+      }
+      state.voices = synth.getVoices() || state.voices;
+    }
+    applyManualThenAuto();
+    if (state.onVoicesChanged) {
+      try {
+        state.onVoicesChanged(getCastInfo());
+      } catch (_) {
+        /* ignore */
+      }
+    }
   }
-
-  let speakGeneration = 0;
 
   function unlock() {
     if (state.unlocked || !synth) return;
     state.unlocked = true;
-    // Do NOT cancel here — cancel+immediate speak is a known Chrome silent-fail.
     try {
       if (synth.paused) synth.resume();
     } catch (_) {
@@ -354,217 +365,208 @@ export function createVoiceDirector(options = {}) {
   }
 
   function stop() {
+    jobId += 1; // cancel pending async speak
+    activeJob = null;
+    state.speaking = false;
     if (!synth) return;
-    speakGeneration += 1; // invalidate in-flight delayed speaks
     try {
       synth.cancel();
     } catch (_) {
       /* ignore */
     }
-    state.speaking = false;
-    state.current = null;
-  }
-
-  function pickVoiceForRole(role) {
-    let v = state.assigned[role] || null;
-    if (v && !matchesAppLang(v, state.appLang)) v = null;
-    if (!v) {
-      const pool = state.voices.filter((x) => matchesAppLang(x, state.appLang));
-      const profile = profiles()[role] || profiles().guest;
-      const used = new Set(
-        Object.values(state.assigned)
-          .filter(Boolean)
-          .map((x) => x.voiceURI)
-      );
-      pool.sort(
-        (a, b) =>
-          scoreVoice(b, profile, used, state.appLang) - scoreVoice(a, profile, used, state.appLang)
-      );
-      v = pool[0] || null;
-    }
-    // Absolute fallback: any voice matching language
-    if (!v) {
-      v = state.voices.find((x) => matchesAppLang(x, state.appLang)) || null;
-    }
-    return v;
-  }
-
-  function queueUtterance(cleaned, role, pitch, rate, volume, estimated, allowRetry) {
-    const gen = speakGeneration;
-    return new Promise((resolve) => {
-      // Chrome: must wait after cancel() or speak() is dropped with no error
-      window.setTimeout(() => {
-        if (gen !== speakGeneration || !synth) {
-          resolve({ ok: false, estimated });
-          return;
-        }
-
-        // Refresh voice list if empty (common on first English speak)
-        if (!state.voices.length) {
-          state.voices = synth.getVoices() || [];
-          applyManualThenAuto();
-        }
-
-        const u = new SpeechSynthesisUtterance(cleaned);
-        const picked = pickVoiceForRole(role);
-        // Prefer the voice's own BCP-47 tag so Windows SAPI actually speaks
-        u.lang = (picked && picked.lang) || speechLangCode(state.appLang);
-        u.pitch = pitch;
-        u.rate = rate;
-        u.volume = volume;
-        if (picked) u.voice = picked;
-
-        state.current = u;
-        state.speaking = true;
-
-        let settled = false;
-        const done = (ok) => {
-          if (settled) return;
-          settled = true;
-          if (state.current === u) {
-            state.speaking = false;
-            state.current = null;
-          }
-          if (state.onEnd) state.onEnd(role, ok);
-          resolve({ ok, estimated });
-        };
-
-        u.onstart = () => {
-          if (state.onStart) state.onStart(role);
-        };
-        u.onend = () => done(true);
-        u.onerror = (ev) => {
-          // Retry once without a bound voice (fixes bad cross-lang / dead voiceURI)
-          if (allowRetry && gen === speakGeneration) {
-            try {
-              synth.cancel();
-            } catch (_) {
-              /* ignore */
-            }
-            window.setTimeout(() => {
-              if (gen !== speakGeneration) {
-                done(false);
-                return;
-              }
-              const retry = new SpeechSynthesisUtterance(cleaned);
-              retry.lang = speechLangCode(state.appLang);
-              retry.pitch = pitch;
-              retry.rate = rate;
-              retry.volume = volume;
-              // try any EN/ZH voice again by lang only
-              const any = state.voices.find((x) => matchesAppLang(x, state.appLang));
-              if (any) {
-                retry.voice = any;
-                if (any.lang) retry.lang = any.lang;
-              }
-              state.current = retry;
-              retry.onend = () => done(true);
-              retry.onerror = () => {
-                if (state.onError) state.onError(ev);
-                done(false);
-              };
-              try {
-                if (synth.paused) synth.resume();
-                synth.speak(retry);
-              } catch (err) {
-                if (state.onError) state.onError(err);
-                done(false);
-              }
-            }, 80);
-            return;
-          }
-          if (state.onError) state.onError(ev);
-          done(false);
-        };
-
-        try {
-          if (synth.paused) synth.resume();
-          synth.speak(u);
-          // Watchdog: if engine never starts (Chrome bug), force retry path
-          window.setTimeout(() => {
-            if (settled || gen !== speakGeneration) return;
-            if (state.current === u && !synth.speaking && !synth.pending) {
-              // never started — trigger error retry
-              try {
-                u.onerror?.({ error: 'not-started' });
-              } catch (_) {
-                done(false);
-              }
-            }
-          }, 600);
-          window.setTimeout(() => {
-            if (state.current === u) done(false);
-          }, estimated * 1000 + 5000);
-        } catch (err) {
-          if (state.onError) state.onError(err);
-          done(false);
-        }
-      }, 70);
-    });
   }
 
   function resolvePitchRate(role, emotion = 'calm') {
     const profile = profiles()[role] || profiles().guest;
-    const mp = manualPitch();
-    const mr = manualRate();
+    const mp = manualPitchMap();
+    const mr = manualRateMap();
     let pitch = typeof mp[role] === 'number' ? mp[role] : profile.pitch;
     let rate = typeof mr[role] === 'number' ? mr[role] : profile.rate;
 
     switch (emotion) {
       case 'angry':
-        pitch += 0.08;
-        rate += 0.08;
+        pitch += 0.04;
+        rate += 0.05;
         break;
       case 'tense':
-        rate += 0.05;
-        pitch += 0.04;
+        rate += 0.03;
+        pitch += 0.02;
         break;
       case 'thoughtful':
-        rate -= 0.06;
-        pitch -= 0.03;
+        rate -= 0.04;
+        pitch -= 0.02;
         break;
       case 'hopeful':
-        pitch += 0.05;
-        rate -= 0.02;
+        pitch += 0.02;
         break;
       default:
         break;
     }
 
-    if (role === 'philosopher') {
-      rate = Math.min(rate, 0.95);
-    }
-    if (role === 'youth' && (emotion === 'angry' || emotion === 'tense')) {
-      rate = Math.min(1.25, rate + 0.04);
-    }
-
-    return {
-      pitch: Math.max(0.1, Math.min(2, pitch)),
-      rate: Math.max(0.5, Math.min(1.5, rate)),
-      volume: Math.max(0, Math.min(1, profile.volume * state.volume)),
-    };
+    // Hard clamp — outside this range many engines go silent
+    pitch = Math.max(0.85, Math.min(1.15, pitch));
+    rate = Math.max(0.7, Math.min(1.25, rate));
+    const volume = Math.max(0.2, Math.min(1, profile.volume * state.volume));
+    return { pitch, rate, volume };
   }
 
-  function speak(role, text, emotion = 'calm') {
+  function pickVoice(role) {
+    let v = state.assigned[role];
+    if (v && matchesAppLang(v, state.appLang)) return v;
+    const pool = langPool();
+    if (!pool.length) return null;
+    const profile = profiles()[role] || profiles().guest;
+    const used = new Set();
+    pool.sort(
+      (a, b) =>
+        scoreVoice(b, profile, used, state.appLang) - scoreVoice(a, profile, used, state.appLang)
+    );
+    return pool[0] || null;
+  }
+
+  /**
+   * Speak one utterance; waits for engine idle after cancel (fixes Chrome EN silence).
+   */
+  async function speak(role, text, emotion = 'calm') {
     const cleaned = cleanSpeechText(text, state.appLang);
     const { pitch, rate, volume } = resolvePitchRate(role, emotion);
-    // English duration: count words roughly; Chinese uses chars
-    const estimated =
-      state.appLang === 'en'
-        ? Math.max(1.2, (cleaned.split(/\s+/).filter(Boolean).length / 2.4) / Math.max(0.5, rate) + 0.4)
-        : estimateSpeechSeconds(cleaned, rate);
+    const estimated = estimateSpeechSeconds(cleaned, rate, state.appLang);
 
     if (!state.enabled || !synth || !cleaned) {
-      return Promise.resolve({ ok: false, estimated });
+      return { ok: false, estimated };
     }
 
     unlock();
-    // stop() cancels; queueUtterance waits before speak (Chrome silent-fail fix)
-    stop();
-    return queueUtterance(cleaned, role, pitch, rate, volume, estimated, true);
+    const myId = ++jobId;
+    activeJob = { id: myId };
+
+    // Always cancel previous, then wait for idle
+    try {
+      synth.cancel();
+    } catch (_) {
+      /* ignore */
+    }
+    await waitForSynthIdle(synth, 1200);
+    if (myId !== jobId) return { ok: false, estimated };
+
+    // Refresh voices if needed (EN list often empty until user gesture)
+    if (!state.voices.length || !langPool().length) {
+      state.voices = synth.getVoices() || [];
+      applyManualThenAuto();
+    }
+
+    const runOnce = (useVoice, forceLang) =>
+      new Promise((resolve) => {
+        if (myId !== jobId) {
+          resolve(false);
+          return;
+        }
+        const u = new SpeechSynthesisUtterance(cleaned);
+        u.pitch = pitch;
+        u.rate = rate;
+        u.volume = volume;
+
+        if (useVoice) {
+          u.voice = useVoice;
+          u.lang = useVoice.lang || forceLang || speechLangCode(state.appLang);
+        } else {
+          u.lang = forceLang || speechLangCode(state.appLang);
+        }
+
+        let settled = false;
+        const finish = (ok) => {
+          if (settled) return;
+          settled = true;
+          if (myId === jobId) state.speaking = false;
+          resolve(ok);
+        };
+
+        u.onstart = () => {
+          if (myId === jobId) {
+            state.speaking = true;
+            if (state.onStart) state.onStart(role);
+          }
+        };
+        u.onend = () => finish(true);
+        u.onerror = (ev) => {
+          // interrupted is normal when advancing lines
+          if (ev && (ev.error === 'interrupted' || ev.error === 'canceled')) {
+            finish(false);
+            return;
+          }
+          if (state.onError) state.onError(ev);
+          finish(false);
+        };
+
+        try {
+          if (synth.paused) synth.resume();
+          synth.speak(u);
+          // If never starts within 800ms, treat as failure
+          setTimeout(() => {
+            if (!settled && myId === jobId && !synth.speaking && !synth.pending) {
+              finish(false);
+            }
+          }, 800);
+          // Absolute cap
+          setTimeout(() => {
+            if (!settled) finish(false);
+          }, estimated * 1000 + 6000);
+        } catch (err) {
+          if (state.onError) state.onError(err);
+          finish(false);
+        }
+      });
+
+    // Attempt 1: preferred role voice
+    let voice = pickVoice(role);
+    let ok = await runOnce(voice, speechLangCode(state.appLang));
+    if (myId !== jobId) return { ok: false, estimated };
+
+    // Attempt 2: any same-language voice, pitch=1 (max compatibility)
+    if (!ok) {
+      await waitForSynthIdle(synth, 800);
+      if (myId !== jobId) return { ok: false, estimated };
+      const any = langPool()[0] || null;
+      // temporarily neutralize pitch
+      const prevPitch = pitch;
+      ok = await new Promise(async (resolve) => {
+        // inline simpler second try with pitch 1
+        const u = new SpeechSynthesisUtterance(cleaned);
+        u.pitch = 1;
+        u.rate = Math.min(1.1, Math.max(0.85, rate));
+        u.volume = volume;
+        if (any) {
+          u.voice = any;
+          u.lang = any.lang || speechLangCode(state.appLang);
+        } else {
+          u.lang = speechLangCode(state.appLang);
+        }
+        let settled = false;
+        const finish = (v) => {
+          if (settled) return;
+          settled = true;
+          resolve(v);
+        };
+        u.onend = () => finish(true);
+        u.onerror = () => finish(false);
+        try {
+          if (synth.paused) synth.resume();
+          synth.speak(u);
+          setTimeout(() => {
+            if (!settled && !synth.speaking) finish(false);
+          }, 1000);
+          setTimeout(() => finish(false), estimated * 1000 + 5000);
+        } catch (_) {
+          finish(false);
+        }
+        void prevPitch;
+      });
+    }
+
+    if (myId === jobId && state.onEnd) state.onEnd(role, ok);
+    return { ok, estimated };
   }
 
-  /** Preview without affecting story timer much */
   function preview(role, text) {
     const pack = PREVIEW_LINES[state.appLang] || PREVIEW_LINES.en;
     const sample = text || pack[role] || pack.narrator;
@@ -572,13 +574,8 @@ export function createVoiceDirector(options = {}) {
     return speak(role, sample, 'calm');
   }
 
-  /**
-   * Manually assign a system voice to a role (for current app language).
-   * @param {string} role
-   * @param {string|null} voiceURI  null = back to auto
-   */
   function setRoleVoice(role, voiceURI) {
-    const uris = manualUri();
+    const uris = manualUriMap();
     if (voiceURI) uris[role] = voiceURI;
     else delete uris[role];
     applyManualThenAuto();
@@ -587,12 +584,13 @@ export function createVoiceDirector(options = {}) {
   }
 
   function setRolePitch(role, pitch) {
-    manualPitch()[role] = Math.max(0.5, Math.min(1.5, Number(pitch)));
+    // Clamp to safe range in UI too
+    manualPitchMap()[role] = Math.max(0.85, Math.min(1.15, Number(pitch)));
     persist();
   }
 
   function setRoleRate(role, rate) {
-    manualRate()[role] = Math.max(0.6, Math.min(1.4, Number(rate)));
+    manualRateMap()[role] = Math.max(0.7, Math.min(1.25, Number(rate)));
     persist();
   }
 
@@ -607,9 +605,8 @@ export function createVoiceDirector(options = {}) {
 
   function listVoices({ langFilter = null } = {}) {
     const filter = langFilter || state.appLang;
-    let list = state.voices.filter((v) => matchesAppLang(v, filter === 'zh' ? 'zh' : 'en'));
-    // Keep list language-pure for casting UI; if empty, show empty so user knows to install packs
-    return list
+    return state.voices
+      .filter((v) => matchesAppLang(v, filter === 'zh' ? 'zh' : 'en'))
       .map((v) => ({
         name: v.name,
         lang: v.lang,
@@ -624,9 +621,9 @@ export function createVoiceDirector(options = {}) {
     const roles = ['philosopher', 'youth', 'narrator'];
     const cast = {};
     const pack = profiles();
-    const uris = manualUri();
-    const mp = manualPitch();
-    const mr = manualRate();
+    const uris = manualUriMap();
+    const mp = manualPitchMap();
+    const mr = manualRateMap();
     for (const role of roles) {
       const v = state.assigned[role];
       const profile = pack[role];
@@ -641,12 +638,11 @@ export function createVoiceDirector(options = {}) {
         styleNote: profile?.styleNote || '',
       };
     }
-    const filtered = listVoices();
     return {
       ready: state.ready,
       appLang: state.appLang,
       voiceCount: state.voices.length,
-      filteredCount: filtered.length,
+      filteredCount: listVoices().length,
       chineseCount: listVoices({ langFilter: 'zh' }).length,
       englishCount: listVoices({ langFilter: 'en' }).length,
       cast,
@@ -678,14 +674,29 @@ export function createVoiceDirector(options = {}) {
     };
   }
 
+  function unlock() {
+    if (state.unlocked || !synth) return;
+    state.unlocked = true;
+    try {
+      if (synth.paused) synth.resume();
+      // Warm-up: populate voices after gesture
+      state.voices = synth.getVoices() || state.voices;
+      applyManualThenAuto();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function registerRole() {
+    /* reserved */
+  }
+
   if (synth) {
     refreshVoices();
-    if (typeof speechSynthesis !== 'undefined') {
-      speechSynthesis.onvoiceschanged = refreshVoices;
-    }
-    setTimeout(refreshVoices, 250);
-    setTimeout(refreshVoices, 1000);
-    setTimeout(refreshVoices, 2500);
+    speechSynthesis.onvoiceschanged = refreshVoices;
+    setTimeout(refreshVoices, 200);
+    setTimeout(refreshVoices, 800);
+    setTimeout(refreshVoices, 2000);
   }
 
   return {
@@ -707,7 +718,7 @@ export function createVoiceDirector(options = {}) {
     cleanSpeechText,
     estimateSpeechSeconds: (role, text) => {
       const { rate } = resolvePitchRate(role, 'calm');
-      return estimateSpeechSeconds(text, rate);
+      return estimateSpeechSeconds(text, rate, state.appLang);
     },
     get profiles() {
       return profiles();

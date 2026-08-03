@@ -214,7 +214,12 @@ function switchLanguage(lang) {
   voice.stop();
   setLang(lang);
   applyLocale();
-  if (playing) speakCurrentLine();
+  // Let speechSynthesis settle after cancel + voice rebind (Chrome EN silent-fail)
+  if (playing) {
+    window.setTimeout(() => {
+      if (playing) speakCurrentLine();
+    }, 180);
+  }
 }
 
 function toggleVoice() {
@@ -247,13 +252,20 @@ function renderCastPanel() {
   const info = voice.getCastInfo();
   const voices = voice.listVoices();
   if (castStatus) {
-    castStatus.textContent = info.ready
-      ? getLang() === 'zh'
-        ? `系统音色 ${info.voiceCount} 个（列表 ${voices.length} 个 · 当前语言 ${info.appLang}）`
-        : `System voices: ${info.voiceCount} (showing ${voices.length} · lang ${info.appLang})`
-      : getLang() === 'zh'
-        ? '正在加载系统音色…'
-        : 'Loading system voices…';
+    if (!info.ready) {
+      castStatus.textContent =
+        getLang() === 'zh' ? '正在加载系统音色…' : 'Loading system voices…';
+    } else if (voices.length === 0) {
+      castStatus.textContent =
+        getLang() === 'zh'
+          ? `未找到${info.appLang === 'en' ? '英文' : '中文'}系统音色。请在 Windows「设置 → 时间和语言 → 语音」中安装语音包后点刷新。`
+          : `No ${info.appLang === 'en' ? 'English' : 'Chinese'} system voices found. Install a speech pack (Windows: Settings → Time & language → Speech), then Refresh.`;
+    } else {
+      castStatus.textContent =
+        getLang() === 'zh'
+          ? `系统音色 ${info.voiceCount} 个 · 当前语言可用 ${voices.length} 个（${info.appLang}）`
+          : `System voices: ${info.voiceCount} · ${voices.length} for ${info.appLang}`;
+    }
   }
 
   castRows.innerHTML = '';
@@ -307,9 +319,9 @@ function renderCastPanel() {
     pitchLab.innerHTML = `<span>${ui('castPitch')} ${c.pitch.toFixed(2)}</span>`;
     const pitchIn = document.createElement('input');
     pitchIn.type = 'range';
-    pitchIn.min = '0.6';
-    pitchIn.max = '1.4';
-    pitchIn.step = '0.02';
+    pitchIn.min = '0.85';
+    pitchIn.max = '1.15';
+    pitchIn.step = '0.01';
     pitchIn.value = String(c.pitch);
     pitchIn.addEventListener('input', () => {
       voice.setRolePitch(role, pitchIn.value);
@@ -322,9 +334,9 @@ function renderCastPanel() {
     rateLab.innerHTML = `<span>${ui('castRate')} ${c.rate.toFixed(2)}</span>`;
     const rateIn = document.createElement('input');
     rateIn.type = 'range';
-    rateIn.min = '0.65';
-    rateIn.max = '1.35';
-    rateIn.step = '0.02';
+    rateIn.min = '0.7';
+    rateIn.max = '1.25';
+    rateIn.step = '0.01';
     rateIn.value = String(c.rate);
     rateIn.addEventListener('input', () => {
       voice.setRoleRate(role, rateIn.value);
