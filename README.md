@@ -6,6 +6,13 @@
 
 **当前可玩：** **全书 P00–P10**（序章 + 五夜对话 + 雪夜终章）。按原著必呈清单加厚论证；`intensity`/`hold` 驱动镜头与静默。文本为叙事改编，**非原文逐字照搬**。配音：系统 TTS + 选声面板。
 
+## 在线体验（GitHub Pages）
+
+- **页面：** https://wsk-builds.github.io/courage-to-be-disliked-3d/
+- **仓库：** https://github.com/wsk-builds/courage-to-be-disliked-3d
+
+纯静态站点，无需构建。推送到 `main` 后 Pages 会自动更新（约 1–2 分钟）。
+
 ### 文档
 
 | 文档 | 内容 |
