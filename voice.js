@@ -133,6 +133,28 @@ function speechLangCode(appLang) {
   return appLang === 'zh' ? 'zh-CN' : 'en-US';
 }
 
+/** True if this system voice should be used for the app language */
+function matchesAppLang(voice, appLang) {
+  if (!voice) return false;
+  const blob = `${voice.name} ${voice.lang}`.toLowerCase();
+  if (appLang === 'zh') {
+    return (
+      /^zh\b/i.test(voice.lang) ||
+      /zh[-_]/i.test(voice.lang) ||
+      /chinese|中文|中国|hong kong|taiwan|cantonese|mandarin/i.test(blob)
+    );
+  }
+  // English: require clear English signal — never treat Chinese voices as EN
+  if (/zh|chinese|中文|中国|hong kong|taiwan|japan|korea|deutsch|france|espa/i.test(blob) && !/en[-_]|english/i.test(blob)) {
+    return false;
+  }
+  return (
+    /^en\b/i.test(voice.lang) ||
+    /en[-_]/i.test(voice.lang) ||
+    /english|united states|united kingdom|great britain|australia|ireland|canada|new zealand|india/i.test(blob)
+  );
+}
+
 export function cleanSpeechText(text, lang = 'en') {
   if (!text) return '';
   let s = String(text)
@@ -264,13 +286,19 @@ export function createVoiceDirector(options = {}) {
     const used = new Set();
     const roles = ['philosopher', 'youth', 'narrator'];
     const uris = manualUri();
+    const pool = state.voices.filter((v) => matchesAppLang(v, state.appLang));
 
     for (const role of roles) {
       const uri = uris[role];
       if (uri) {
         const v = state.voices.find((x) => x.voiceURI === uri) || null;
-        state.assigned[role] = v;
-        if (v) used.add(v.voiceURI);
+        // Drop manual pick if it doesn't match current language (avoids silent EN with ZH voice)
+        if (v && matchesAppLang(v, state.appLang)) {
+          state.assigned[role] = v;
+          used.add(v.voiceURI);
+        } else {
+          state.assigned[role] = null;
+        }
       } else {
         state.assigned[role] = null;
       }
@@ -279,10 +307,11 @@ export function createVoiceDirector(options = {}) {
     for (const role of roles) {
       if (state.assigned[role]) continue;
       const profile = VOICE_PROFILES[role] || VOICE_PROFILES.guest;
-      const ranked = [...state.voices]
+      const ranked = [...pool]
         .map((v) => ({ v, s: scoreVoice(v, profile, used, state.appLang) }))
         .sort((a, b) => b.s - a.s);
       const best = ranked[0]?.v || null;
+      // Only assign if score is not terrible (must be same language pool already)
       state.assigned[role] = best;
       if (best) used.add(best.voiceURI);
     }
@@ -290,6 +319,8 @@ export function createVoiceDirector(options = {}) {
 
   function setAppLang(lang) {
     state.appLang = lang === 'zh' ? 'zh' : 'en';
+    // Re-fetch voices (Chrome often populates late / after lang change)
+    if (synth) state.voices = synth.getVoices() || state.voices;
     applyManualThenAuto();
     if (state.onVoicesChanged) state.onVoicesChanged(getCastInfo());
   }
@@ -309,16 +340,14 @@ export function createVoiceDirector(options = {}) {
     if (state.voices.length) applyManualThenAuto();
   }
 
+  let speakGeneration = 0;
+
   function unlock() {
     if (state.unlocked || !synth) return;
     state.unlocked = true;
+    // Do NOT cancel here — cancel+immediate speak is a known Chrome silent-fail.
     try {
-      synth.cancel();
-      const kick = new SpeechSynthesisUtterance(' ');
-      kick.volume = 0.01;
-      kick.rate = 2;
-      synth.speak(kick);
-      synth.cancel();
+      if (synth.paused) synth.resume();
     } catch (_) {
       /* ignore */
     }
@@ -326,6 +355,7 @@ export function createVoiceDirector(options = {}) {
 
   function stop() {
     if (!synth) return;
+    speakGeneration += 1; // invalidate in-flight delayed speaks
     try {
       synth.cancel();
     } catch (_) {
@@ -333,6 +363,144 @@ export function createVoiceDirector(options = {}) {
     }
     state.speaking = false;
     state.current = null;
+  }
+
+  function pickVoiceForRole(role) {
+    let v = state.assigned[role] || null;
+    if (v && !matchesAppLang(v, state.appLang)) v = null;
+    if (!v) {
+      const pool = state.voices.filter((x) => matchesAppLang(x, state.appLang));
+      const profile = profiles()[role] || profiles().guest;
+      const used = new Set(
+        Object.values(state.assigned)
+          .filter(Boolean)
+          .map((x) => x.voiceURI)
+      );
+      pool.sort(
+        (a, b) =>
+          scoreVoice(b, profile, used, state.appLang) - scoreVoice(a, profile, used, state.appLang)
+      );
+      v = pool[0] || null;
+    }
+    // Absolute fallback: any voice matching language
+    if (!v) {
+      v = state.voices.find((x) => matchesAppLang(x, state.appLang)) || null;
+    }
+    return v;
+  }
+
+  function queueUtterance(cleaned, role, pitch, rate, volume, estimated, allowRetry) {
+    const gen = speakGeneration;
+    return new Promise((resolve) => {
+      // Chrome: must wait after cancel() or speak() is dropped with no error
+      window.setTimeout(() => {
+        if (gen !== speakGeneration || !synth) {
+          resolve({ ok: false, estimated });
+          return;
+        }
+
+        // Refresh voice list if empty (common on first English speak)
+        if (!state.voices.length) {
+          state.voices = synth.getVoices() || [];
+          applyManualThenAuto();
+        }
+
+        const u = new SpeechSynthesisUtterance(cleaned);
+        const picked = pickVoiceForRole(role);
+        // Prefer the voice's own BCP-47 tag so Windows SAPI actually speaks
+        u.lang = (picked && picked.lang) || speechLangCode(state.appLang);
+        u.pitch = pitch;
+        u.rate = rate;
+        u.volume = volume;
+        if (picked) u.voice = picked;
+
+        state.current = u;
+        state.speaking = true;
+
+        let settled = false;
+        const done = (ok) => {
+          if (settled) return;
+          settled = true;
+          if (state.current === u) {
+            state.speaking = false;
+            state.current = null;
+          }
+          if (state.onEnd) state.onEnd(role, ok);
+          resolve({ ok, estimated });
+        };
+
+        u.onstart = () => {
+          if (state.onStart) state.onStart(role);
+        };
+        u.onend = () => done(true);
+        u.onerror = (ev) => {
+          // Retry once without a bound voice (fixes bad cross-lang / dead voiceURI)
+          if (allowRetry && gen === speakGeneration) {
+            try {
+              synth.cancel();
+            } catch (_) {
+              /* ignore */
+            }
+            window.setTimeout(() => {
+              if (gen !== speakGeneration) {
+                done(false);
+                return;
+              }
+              const retry = new SpeechSynthesisUtterance(cleaned);
+              retry.lang = speechLangCode(state.appLang);
+              retry.pitch = pitch;
+              retry.rate = rate;
+              retry.volume = volume;
+              // try any EN/ZH voice again by lang only
+              const any = state.voices.find((x) => matchesAppLang(x, state.appLang));
+              if (any) {
+                retry.voice = any;
+                if (any.lang) retry.lang = any.lang;
+              }
+              state.current = retry;
+              retry.onend = () => done(true);
+              retry.onerror = () => {
+                if (state.onError) state.onError(ev);
+                done(false);
+              };
+              try {
+                if (synth.paused) synth.resume();
+                synth.speak(retry);
+              } catch (err) {
+                if (state.onError) state.onError(err);
+                done(false);
+              }
+            }, 80);
+            return;
+          }
+          if (state.onError) state.onError(ev);
+          done(false);
+        };
+
+        try {
+          if (synth.paused) synth.resume();
+          synth.speak(u);
+          // Watchdog: if engine never starts (Chrome bug), force retry path
+          window.setTimeout(() => {
+            if (settled || gen !== speakGeneration) return;
+            if (state.current === u && !synth.speaking && !synth.pending) {
+              // never started — trigger error retry
+              try {
+                u.onerror?.({ error: 'not-started' });
+              } catch (_) {
+                done(false);
+              }
+            }
+          }, 600);
+          window.setTimeout(() => {
+            if (state.current === u) done(false);
+          }, estimated * 1000 + 5000);
+        } catch (err) {
+          if (state.onError) state.onError(err);
+          done(false);
+        }
+      }, 70);
+    });
   }
 
   function resolvePitchRate(role, emotion = 'calm') {
@@ -378,65 +546,22 @@ export function createVoiceDirector(options = {}) {
   }
 
   function speak(role, text, emotion = 'calm') {
-    const profile = profiles()[role] || profiles().guest;
     const cleaned = cleanSpeechText(text, state.appLang);
     const { pitch, rate, volume } = resolvePitchRate(role, emotion);
-    const estimated = estimateSpeechSeconds(cleaned, rate);
+    // English duration: count words roughly; Chinese uses chars
+    const estimated =
+      state.appLang === 'en'
+        ? Math.max(1.2, (cleaned.split(/\s+/).filter(Boolean).length / 2.4) / Math.max(0.5, rate) + 0.4)
+        : estimateSpeechSeconds(cleaned, rate);
 
     if (!state.enabled || !synth || !cleaned) {
       return Promise.resolve({ ok: false, estimated });
     }
 
     unlock();
+    // stop() cancels; queueUtterance waits before speak (Chrome silent-fail fix)
     stop();
-
-    return new Promise((resolve) => {
-      const u = new SpeechSynthesisUtterance(cleaned);
-      u.lang = speechLangCode(state.appLang);
-      u.pitch = pitch;
-      u.rate = rate;
-      u.volume = volume;
-
-      const langRe = state.appLang === 'zh' ? /zh/i : /en/i;
-      const v =
-        state.assigned[role] ||
-        state.assigned.narrator ||
-        state.voices.find((x) => langRe.test(x.lang));
-      if (v) u.voice = v;
-
-      state.current = u;
-      state.speaking = true;
-
-      let settled = false;
-      const done = (ok) => {
-        if (settled) return;
-        settled = true;
-        state.speaking = false;
-        state.current = null;
-        if (state.onEnd) state.onEnd(role, ok);
-        resolve({ ok, estimated });
-      };
-
-      u.onstart = () => {
-        if (state.onStart) state.onStart(role);
-      };
-      u.onend = () => done(true);
-      u.onerror = (ev) => {
-        if (state.onError) state.onError(ev);
-        done(false);
-      };
-
-      try {
-        if (synth.paused) synth.resume();
-        synth.speak(u);
-        window.setTimeout(() => {
-          if (state.current === u) done(false);
-        }, estimated * 1000 + 4000);
-      } catch (err) {
-        if (state.onError) state.onError(err);
-        done(false);
-      }
-    });
+    return queueUtterance(cleaned, role, pitch, rate, volume, estimated, true);
   }
 
   /** Preview without affecting story timer much */
@@ -482,17 +607,8 @@ export function createVoiceDirector(options = {}) {
 
   function listVoices({ langFilter = null } = {}) {
     const filter = langFilter || state.appLang;
-    let list = [...state.voices];
-    if (filter === 'zh') {
-      list = list.filter(
-        (v) => /zh/i.test(v.lang) || /chinese|中文|中国|hong kong|taiwan/i.test(v.name)
-      );
-    } else if (filter === 'en') {
-      list = list.filter(
-        (v) => /en/i.test(v.lang) || /english|united states|united kingdom|australia|ireland/i.test(v.name)
-      );
-    }
-    if (!list.length) list = [...state.voices];
+    let list = state.voices.filter((v) => matchesAppLang(v, filter === 'zh' ? 'zh' : 'en'));
+    // Keep list language-pure for casting UI; if empty, show empty so user knows to install packs
     return list
       .map((v) => ({
         name: v.name,
@@ -501,13 +617,7 @@ export function createVoiceDirector(options = {}) {
         localService: !!v.localService,
         default: !!v.default,
       }))
-      .sort((a, b) => {
-        const pref = filter === 'zh' ? /zh/i : /en/i;
-        const az = pref.test(a.lang) ? 0 : 1;
-        const bz = pref.test(b.lang) ? 0 : 1;
-        if (az !== bz) return az - bz;
-        return a.name.localeCompare(b.name, filter === 'zh' ? 'zh' : 'en');
-      });
+      .sort((a, b) => a.name.localeCompare(b.name, filter === 'zh' ? 'zh' : 'en'));
   }
 
   function getCastInfo() {
