@@ -111,6 +111,16 @@ const voice = createVoiceDirector({
 let voiceGeneration = 0;
 let currentLineDuration = 6;
 
+// Story state must be declared before applyLocale() (called early on boot)
+let lineIndex = 0;
+let lineTime = 0;
+let playing = false;
+let typewriterLen = 0;
+let displayedText = '';
+let youthEntered = false;
+let youthSeated = false;
+let lastNightPhase = null;
+
 function unlockAudio() {
   voice.unlock();
 }
@@ -173,24 +183,26 @@ function applyLocale() {
 
   voice.setAppLang(lang);
   updateVoiceButton();
-  buildPartRail();
-  const partId = getPartForLine(lineIndex) || PART_BOUNDARIES[0]?.partId;
-  if (partId) buildSegmentRail(partId);
-  refreshRailActive();
 
-  // Refresh visible dialogue in new language
-  if (typeof lineIndex === 'number' && LINES[lineIndex]) {
+  // Rails / dialogue only after story state exists and rails helpers are ready
+  if (typeof buildPartRail === 'function') {
+    buildPartRail();
+    const partId = getPartForLine(lineIndex) || PART_BOUNDARIES[0]?.partId;
+    if (partId && typeof buildSegmentRail === 'function') buildSegmentRail(partId);
+    if (typeof refreshRailActive === 'function') refreshRailActive();
+  }
+
+  if (LINES[lineIndex]) {
     const line = LINES[lineIndex];
     if (speakerEl) {
       const labels = ui('speakers') || {};
       speakerEl.textContent = labels[line.speaker] || line.speaker;
     }
     if (dialogueEl) {
-      // keep typewriter progress proportionally
       const full = lineText(line);
       dialogueEl.textContent = full.slice(0, Math.floor(typewriterLen) || full.length);
     }
-    updateMinimap(line);
+    if (typeof updateMinimap === 'function') updateMinimap(line);
   }
   if (castPanel && !castPanel.hidden) renderCastPanel();
 }
@@ -674,16 +686,7 @@ function updateMinimap(line) {
   minimapLabel.textContent = map[line.camera] || map.exterior || '';
 }
 
-// ——— Story state ———
-let lineIndex = 0;
-let lineTime = 0;
-let playing = false;
-let typewriterLen = 0;
-let displayedText = '';
-let youthEntered = false;
-let youthSeated = false;
-let lastNightPhase = null;
-
+// ——— Story helpers ———
 function seatYouthNow() {
   youth.stopWalk();
   youth.root.position.set(world.anchors.youthSeat.x, 0.15, world.anchors.youthSeat.z);
